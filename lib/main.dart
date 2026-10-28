@@ -1,18 +1,15 @@
-// lib/main.dart
-
 import 'package:flutter/material.dart';
 import 'package:flutter_naver_map/flutter_naver_map.dart';
-
-import 'models/zone_model.dart';
 import 'services/vworld_services.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  await FlutterNaverMap().init(
-    clientId: '6pq4zvh61t', // 🔑 네이버 Client ID 입력
-    onAuthFailed: (ex) {
-      print("네이버 지도 인증 실패: $ex");
+  // 네이버 지도 SDK 초기화
+  await NaverMapSdk.instance.initialize(
+    clientId: '네이버 clinent ID', // 본인의 네이버 Client ID 입력
+    onAuthFailed: (error) {
+      print("네이버 지도 인증 실패: $error");
     },
   );
 
@@ -24,10 +21,9 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
+    return const MaterialApp(
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(useMaterial3: true, primarySwatch: Colors.blue),
-      home: const MapScreen(),
+      home: MapScreen(),
     );
   }
 }
@@ -42,259 +38,178 @@ class MapScreen extends StatefulWidget {
 class _MapScreenState extends State<MapScreen> {
   NaverMapController? _mapController;
   final TextEditingController _searchController = TextEditingController();
-
-  List<ZonePolygonModel> _currentPolygons = [];
-  final Set<NPolygonOverlay> _overlays = {};
   bool _isLoading = false;
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      appBar: AppBar(
+        title: const Text('도시정비사업 구역 지도'),
+        actions: [
+          // 새로고침 버튼 (현재 위치 영역의 구역 데이터 다시 로드)
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: _loadZonesInCurrentBounds,
+          ),
+        ],
+      ),
       body: Stack(
         children: [
-          // 1. 네이버 지도 (서울 시청 기본 좌표)
+          // 네이버 지도 위젯
           NaverMap(
             options: const NaverMapViewOptions(
               initialCameraPosition: NCameraPosition(
-                target: NLatLng(37.5665, 126.9780), // 서울 시청 중심
-                zoom: 14.5,
+                target: NLatLng(37.5665, 126.9780), // 서울시청 중심
+                zoom: 13,
               ),
-              mapType: NMapType.basic,
-              indoorEnable: true, // 실내지도 옵션
+              locationButtonEnable: true,
             ),
             onMapReady: (controller) {
               _mapController = controller;
-              _fetchCurrentCameraZones();
+              // 지도가 로드된 직후 현재 화면 영역 내 정비구역 로드
+              _loadZonesInCurrentBounds();
             },
+            // 지도 이동이 멈췄을 때 화면 영역 내 구역을 새로 불러오려면 주석 해제
+            /*
             onCameraChange: (reason, animated) {
-              // 카메라 이동 멈췄을 때 해당 화면 구역 재로드
+              // 이동 종료 시 로드 로직
             },
-            onCameraIdle: () {
-              _fetchCurrentCameraZones();
-            },
+            */
           ),
 
-          // 2. 상단 주소/구역 검색창
-          SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.all(12.0),
-              child: Card(
-                elevation: 6,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                  height: 52,
-                  child: Row(
-                    children: [
-                      const Icon(Icons.search, color: Colors.blueAccent),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: TextField(
-                          controller: _searchController,
-                          decoration: const InputDecoration(
-                            hintText: '구역명 또는 지역명 검색 (예: 서소문, 순화, 신길)',
-                            border: InputBorder.none,
-                          ),
-                          onSubmitted: (value) => _searchAndMove(value),
-                        ),
-                      ),
-                      if (_isLoading)
-                        const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      else
-                        IconButton(
-                          icon: const Icon(Icons.clear, color: Colors.grey),
-                          onPressed: () => _searchController.clear(),
-                        ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-
-          // 3. 우측 상단 범례
+          // 상단 장소/주소 검색 창 UI
           Positioned(
-            top: 80,
-            right: 12,
+            top: 16,
+            left: 16,
+            right: 16,
             child: Card(
-              color: Colors.white.withOpacity(0.92),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              elevation: 4,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
               child: Padding(
-                padding: const EdgeInsets.all(8.0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: Row(
                   children: [
-                    _legendItem(Colors.orange, '재개발'),
-                    const SizedBox(height: 4),
-                    _legendItem(Colors.blue, '재건축'),
-                    const SizedBox(height: 4),
-                    _legendItem(Colors.green, '주거환경개선'),
-                    const SizedBox(height: 4),
-                    _legendItem(Colors.purple, '기타/도시환경'),
+                    Expanded(
+                      child: TextField(
+                        controller: _searchController,
+                        decoration: const InputDecoration(
+                          hintText: '지역명 또는 장소 검색 (예: 여의도)',
+                          border: InputBorder.none,
+                        ),
+                        onSubmitted: (value) => _searchAndMoveLocation(value),
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.search),
+                      onPressed: () =>
+                          _searchAndMoveLocation(_searchController.text),
+                    ),
                   ],
                 ),
               ),
             ),
           ),
+
+          // 로딩 표시기
+          if (_isLoading)
+            const Center(
+              child: CircularProgressIndicator(),
+            ),
         ],
       ),
     );
   }
 
-  Widget _legendItem(Color color, String label) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 12,
-          height: 12,
-          decoration: BoxDecoration(
-            color: color.withOpacity(0.4),
-            border: Border.all(color: color, width: 1.5),
-            borderRadius: BorderRadius.circular(2),
-          ),
-        ),
-        const SizedBox(width: 6),
-        Text(label, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
-      ],
-    );
-  }
-
-  Color _getZoneColor(String? type) {
-    if (type == null) return Colors.indigo;
-    if (type.contains('재개발')) return Colors.orange;
-    if (type.contains('재건축')) return Colors.blue;
-    if (type.contains('주거환경')) return Colors.green;
-    return Colors.indigo;
-  }
-
-  // 현재 화면 영역(BBOX) 기반으로 정비구역 가져와 지도에 오버레이 추가
-  Future<void> _fetchCurrentCameraZones() async {
+  // 1. 현재 지도의 바운즈(영역) 기반으로 VWorld API 호출 및 반투명 도형 렌더링
+  Future<void> _loadZonesInCurrentBounds() async {
     if (_mapController == null) return;
 
     setState(() => _isLoading = true);
 
     try {
-      final bounds = await _mapController!.getContentBounds();
-      final zones = await VworldService.fetchZonesByBounds(bounds);
+      // 현재 화면에 보이는 지도의 NLatLngBounds 좌표 영역 가져오기
+      final NLatLngBounds bounds = await _mapController!.getContentBounds();
 
-      // 기존 오버레이 삭제
-      for (var overlay in _overlays) {
-        _mapController?.deleteOverlay(overlay.info);
+      // VworldService를 통해 해당 영역 내 정비구역 좌표 리스트 받아오기
+      final List<List<NLatLng>> zonePolygons =
+      await VworldService.fetchZonesByBounds(bounds);
+
+      // 기존 오버레이 모두 제거
+      _mapController!.clearOverlays();
+
+      // 받아온 구역 좌표들을 NPolygonOverlay로 만들어 지도에 추가
+      for (int i = 0; i < zonePolygons.length; i++) {
+        final polygonPoints = zonePolygons[i];
+
+        if (polygonPoints.length >= 3) {
+          final polygon = NPolygonOverlay(
+            id: 'vworld_zone_$i',
+            coords: polygonPoints,
+            color: Colors.red.withOpacity(0.35), // 반투명 빨간색
+            outlineColor: Colors.red,             // 테두리 선 색상
+            outlineWidth: 2,
+          );
+
+          _mapController!.addOverlay(polygon);
+        }
       }
-      _overlays.clear();
-      _currentPolygons = zones;
 
-      // 새 구역 도형 추가
-      for (int i = 0; i < zones.length; i++) {
-        final zone = zones[i];
-        final baseColor = _getZoneColor(zone.detailInfo?.type);
-
-        final polygonOverlay = NPolygonOverlay(
-          id: 'zone_poly_${DateTime.now().millisecondsSinceEpoch}_$i',
-          coords: zone.coordinates,
-          color: baseColor.withOpacity(0.28),
-          outlineColor: baseColor,
-          outlineWidth: 2,
-        );
-
-        polygonOverlay.setOnTapListener((overlay) {
-          _showZoneDetailModal(zone);
-        });
-
-        _overlays.add(polygonOverlay);
-        _mapController?.addOverlay(polygonOverlay);
+      if (zonePolygons.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('현재 화면 영역 내에 표시할 도시정비구역이 없습니다.'),
+              duration: Duration(seconds: 2),
+            ),
+          );
+        }
       }
     } catch (e) {
-      print("오버레이 렌더링 오류: $e");
+      print("구역 로딩 중 오류 발생: $e");
     } finally {
-      if (mounted) setState(() => _isLoading = false);
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
     }
   }
 
-  void _showZoneDetailModal(ZonePolygonModel zone) {
-    final info = zone.detailInfo;
+  // 2. VworldService.searchLocation을 활용한 장소 검색 및 카메라 이동
+  Future<void> _searchAndMoveLocation(String query) async {
+    if (query.trim().isEmpty || _mapController == null) return;
 
-    showModalBottomSheet(
-      context: context,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (context) {
-        return Container(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Expanded(
-                    child: Text(
-                      zone.name,
-                      style: const TextStyle(fontSize: 19, fontWeight: FontWeight.bold),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                  Chip(
-                    label: Text(
-                      info?.type ?? '도시정비구역',
-                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-                    ),
-                    backgroundColor: _getZoneColor(info?.type),
-                  ),
-                ],
-              ),
-              const Divider(height: 24),
-              _detailRow(Icons.location_on, '위치', '${info?.sido ?? '서울'} ${info?.sigungu ?? ''}'),
-              _detailRow(Icons.trending_up, '추진단계', info?.stage ?? '구역지정/진행중', highlight: true),
-              _detailRow(Icons.apartment, '공급예정 세대수', info?.householdCount != null && info!.householdCount.isNotEmpty ? '${info.householdCount} 세대' : '확인중'),
-              _detailRow(Icons.business, '사업시행자', info?.executor ?? '조합/추진위'),
-            ],
-          ),
-        );
-      },
-    );
-  }
+    FocusScope.of(context).unfocus(); // 키보드 내리기
+    setState(() => _isLoading = true);
 
-  Widget _detailRow(IconData icon, String title, String value, {bool highlight = false}) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 5.0),
-      child: Row(
-        children: [
-          Icon(icon, size: 18, color: Colors.grey.shade600),
-          const SizedBox(width: 8),
-          SizedBox(
-            width: 95,
-            child: Text(title, style: TextStyle(color: Colors.grey.shade700, fontSize: 13)),
-          ),
-          Expanded(
-            child: Text(
-              value.isEmpty ? '정보 없음' : value,
-              style: TextStyle(
-                fontSize: 14,
-                fontWeight: highlight ? FontWeight.bold : FontWeight.w500,
-                color: highlight ? Colors.blue.shade800 : Colors.black87,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+    final NLatLng? searchResult = await VworldService.searchLocation(query);
 
-  Future<void> _searchAndMove(String query) async {
-    if (query.trim().isEmpty) return;
-    final target = await VworldService.searchLocation(query.trim());
-    if (target != null) {
-      _mapController?.updateCamera(
-        NCameraUpdate.scrollAndZoomTo(target: target, zoom: 15),
+    if (searchResult != null) {
+      // 검색된 위치로 지도 카메라 이동
+      final cameraUpdate = NCameraUpdate.scrollAndZoomTo(
+        target: searchResult,
+        zoom: 14,
       );
+      await _mapController!.updateCamera(cameraUpdate);
+
+      // 이동된 위치의 새로운 구역 데이터 로드
+      await _loadZonesInCurrentBounds();
+    } else {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('검색 결과를 찾을 수 없습니다.')),
+        );
+      }
+    }
+
+    if (mounted) {
+      setState(() => _isLoading = false);
     }
   }
 }
