@@ -5,11 +5,22 @@ import 'services/vworld_services.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // 네이버 지도 SDK 초기화
-  await NaverMapSdk.instance.initialize(
-    clientId: '네이버 clinent ID', // 본인의 네이버 Client ID 입력
-    onAuthFailed: (error) {
-      print("네이버 지도 인증 실패: $error");
+  // 네이버 지도 SDK 초기화 (1.3.1부터 새 인증 방식: FlutterNaverMap().init)
+  // Client ID는 실행 옵션으로 넣습니다: --dart-define=NAVER_CLIENT_ID=발급받은ID
+  const naverClientId = String.fromEnvironment('NAVER_CLIENT_ID');
+  await FlutterNaverMap().init(
+    clientId: naverClientId,
+    onAuthFailed: (ex) {
+      switch (ex) {
+        case NUnauthorizedClientException():
+          debugPrint('[NAVER] 401 인증 실패: Client ID 또는 콘솔에 등록한 패키지명(com.example.myzip) 확인 → $ex');
+        case NQuotaExceededException():
+          debugPrint('[NAVER] 429: 콘솔에서 Dynamic Map 서비스 선택 여부/사용량 확인 → $ex');
+        case NClientUnspecifiedException():
+          debugPrint('[NAVER] 800: Client ID가 비어 있음 → $ex');
+        default:
+          debugPrint('[NAVER] 인증 실패 → $ex');
+      }
     },
   );
 
@@ -75,12 +86,8 @@ class _MapScreenState extends State<MapScreen> {
               // 지도가 로드된 직후 현재 화면 영역 내 정비구역 로드
               _loadZonesInCurrentBounds();
             },
-            // 지도 이동이 멈췄을 때 화면 영역 내 구역을 새로 불러오려면 주석 해제
-            /*
-            onCameraChange: (reason, animated) {
-              // 이동 종료 시 로드 로직
-            },
-            */
+            // 지도 이동이 멈추면 새 영역의 구역을 다시 불러옴
+            onCameraIdle: _loadZonesInCurrentBounds,
           ),
 
           // 상단 장소/주소 검색 창 UI
@@ -130,7 +137,11 @@ class _MapScreenState extends State<MapScreen> {
 
   // 1. 현재 지도의 바운즈(영역) 기반으로 VWorld API 호출 및 반투명 도형 렌더링
   Future<void> _loadZonesInCurrentBounds() async {
-    if (_mapController == null) return;
+    if (_mapController == null || _isLoading) return;
+
+    // 너무 멀리서 보면 요청 영역이 커져 V-world가 거부하거나 느려지므로 줌 12 이상에서만 조회
+    final camera = await _mapController!.getCameraPosition();
+    if (camera.zoom < 12) return;
 
     setState(() => _isLoading = true);
 
@@ -153,8 +164,8 @@ class _MapScreenState extends State<MapScreen> {
           final polygon = NPolygonOverlay(
             id: 'vworld_zone_$i',
             coords: polygonPoints,
-            color: Colors.red.withOpacity(0.35), // 반투명 빨간색
-            outlineColor: Colors.red,             // 테두리 선 색상
+            color: Colors.red.withValues(alpha: 0.35), // 반투명 빨간색
+            outlineColor: Colors.red, // 테두리 선 색상
             outlineWidth: 2,
           );
 
@@ -173,7 +184,7 @@ class _MapScreenState extends State<MapScreen> {
         }
       }
     } catch (e) {
-      print("구역 로딩 중 오류 발생: $e");
+      debugPrint("구역 로딩 중 오류 발생: $e");
     } finally {
       if (mounted) {
         setState(() => _isLoading = false);
@@ -189,6 +200,7 @@ class _MapScreenState extends State<MapScreen> {
     setState(() => _isLoading = true);
 
     final NLatLng? searchResult = await VworldService.searchLocation(query);
+    if (mounted) setState(() => _isLoading = false); // 구역 로딩이 막히지 않도록 먼저 해제
 
     if (searchResult != null) {
       // 검색된 위치로 지도 카메라 이동
@@ -206,10 +218,6 @@ class _MapScreenState extends State<MapScreen> {
           const SnackBar(content: Text('검색 결과를 찾을 수 없습니다.')),
         );
       }
-    }
-
-    if (mounted) {
-      setState(() => _isLoading = false);
     }
   }
 }
