@@ -4,6 +4,6 @@ import 'package:myzip/main.dart';
 void main() {
   testWidgets('App load test', (WidgetTester tester) async {
 
-    await tester.pumpWidget(const PropertyApp());
+    await tester.pumpWidget(const MyApp());
   });
 }
