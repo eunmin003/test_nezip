@@ -103,6 +103,7 @@ const List<FavoriteComplex> sampleComplexes = [
     zoneName: '(예시) 동안 재건축구역',
     stage: '조합설립인가',
     isSample: true,
+    parcelAddress: '경기 안양시 동안구 호계동 923-30',
   ),
   FavoriteComplex(
     id: 'sample-2',
