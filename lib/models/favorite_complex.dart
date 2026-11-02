@@ -13,6 +13,13 @@ class FavoriteComplex {
   final String? stage; // 정비사업 추진단계
   final bool isSample;
 
+  // 공시가격 조회용 (실거래가 데이터에서 채움)
+  final String? pnu; // 필지고유번호 19자리
+  final String? parcelAddress; // 지번 주소 (PNU가 없을 때 검색용)
+  final String? dong; // 동 (예: 101동)
+  final String? ho; // 호 (예: 1203호)
+  final int? officialPrice; // 이미 알고 있는 공시가격 (원)
+
   const FavoriteComplex({
     required this.id,
     required this.name,
@@ -23,7 +30,16 @@ class FavoriteComplex {
     this.zoneName,
     this.stage,
     this.isSample = false,
+    this.pnu,
+    this.parcelAddress,
+    this.dong,
+    this.ho,
+    this.officialPrice,
   });
+
+  /// 공시가격 API로 조회할 수 있는 정보가 있는지
+  bool get canLookupOfficialPrice =>
+      (pnu != null && pnu!.length == 19) || (parcelAddress?.isNotEmpty ?? false);
 }
 
 /// 지오코더·CSV의 '서울특별시' + '노원구' 같은 글자를 Region으로 바꿈

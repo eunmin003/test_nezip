@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../tax/calculator.dart' show kMan, formatKorean, formatWon, formatPct;
 import '../tax/loan_calculator.dart';
+import '../tax/policy_loan.dart';
 import '../tax/region_rules.dart';
+import 'calc_basis_screen.dart';
 
 /// 대출 계산기 (LTV·DSR 한도 + 이자)
 class LoanSimulatorScreen extends StatefulWidget {
@@ -22,6 +24,13 @@ class _LoanSimulatorScreenState extends State<LoanSimulatorScreen>
   final _existing = TextEditingController();
   final _rate = TextEditingController(text: '4.0');
   final _desired = TextEditingController();
+  // 정책대출 확인용
+  final _netAssets = TextEditingController();
+  final _myIncome = TextEditingController();
+  bool _newlywed = false;
+  int _children = 0;
+  bool _area85 = true;
+  List<PolicyLoanCheck>? _policy;
   late Region _region = widget.initialRegion ?? const Region(Sido.seoul, '강남구');
   HouseStatus _status = HouseStatus.noHouse;
   RepayType _repay = RepayType.equalPayment;
@@ -34,7 +43,7 @@ class _LoanSimulatorScreenState extends State<LoanSimulatorScreen>
 
   @override
   void dispose() {
-    for (final c in [_price, _income, _existing, _rate, _desired]) {
+    for (final c in [_price, _income, _existing, _rate, _desired, _netAssets, _myIncome]) {
       c.dispose();
     }
     super.dispose();
@@ -81,6 +90,84 @@ class _LoanSimulatorScreenState extends State<LoanSimulatorScreen>
             ),
           );
         },
+      ),
+    );
+  }
+
+  void _checkPolicy() {
+    FocusScope.of(context).unfocus();
+    setState(() {
+      _policy = checkPolicyLoans(PolicyLoanInput(
+        price: _won(_price),
+        householdIncome: _won(_income),
+        applicantIncome: _won(_myIncome),
+        netAssets: _won(_netAssets),
+        status: _status,
+        newlywed: _newlywed,
+        children: _children,
+        area85OrLess: _area85,
+        regulated: isRegulatedNow(_region),
+        existingAnnualRepay: _won(_existing),
+      ));
+    });
+  }
+
+  /// 정책대출(디딤돌·보금자리론) 대상 확인 카드
+  Widget _policySection(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      child: ExpansionTile(
+        leading: Icon(Icons.verified_outlined, color: cs.primary),
+        title: const Text('정책대출 대상인지 확인하기', style: TextStyle(fontWeight: FontWeight.bold)),
+        subtitle: const Text('디딤돌대출 · 보금자리론', style: TextStyle(fontSize: 12)),
+        childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        expandedCrossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('위에 입력한 집값·연소득·주택 보유 상황을 같이 써요.',
+              style: TextStyle(fontSize: 12, color: cs.outline)),
+          _money('부부합산 순자산', _netAssets, hint: '자산 − 부채 (예: 30000 → 3억)'),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('신혼가구'),
+            subtitle: const Text('혼인 7년 이내 또는 3개월 안에 결혼 예정', style: TextStyle(fontSize: 12)),
+            value: _newlywed,
+            onChanged: (v) => setState(() => _newlywed = v),
+          ),
+          if (_newlywed)
+            _money('신청인 본인 연소득 (선택)', _myIncome, hint: '보금자리론 신혼 소득특례 확인용'),
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 6),
+            child: DropdownButtonFormField<int>(
+              key: ValueKey('kids-$_children'),
+              value: _children,
+              decoration:
+              const InputDecoration(labelText: '미성년 자녀 수', border: OutlineInputBorder()),
+              items: const [0, 1, 2, 3]
+                  .map((n) => DropdownMenuItem(value: n, child: Text(n == 3 ? '3명 이상' : '$n명')))
+                  .toList(),
+              onChanged: (v) => setState(() => _children = v ?? 0),
+            ),
+          ),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('전용면적 85㎡ 이하'),
+            value: _area85,
+            onChanged: (v) => setState(() => _area85 = v),
+          ),
+          const SizedBox(height: 4),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton(onPressed: _checkPolicy, child: const Text('대상 여부 확인')),
+          ),
+          if (_policy != null)
+            for (final p in _policy!) _PolicyResultTile(p),
+          const SizedBox(height: 4),
+          Text('※ 대상 여부만 간단히 확인해요. 실제 승인·금리는 주택도시기금(디딤돌), '
+              '한국주택금융공사(보금자리론) 심사로 정해져요.',
+              style: TextStyle(fontSize: 11, color: cs.outline)),
+          const CalcBasisLink(section: BasisSection.policyLoan),
+        ],
       ),
     );
   }
@@ -211,6 +298,10 @@ class _LoanSimulatorScreenState extends State<LoanSimulatorScreen>
         const SizedBox(height: 8),
         FilledButton(onPressed: _calc, child: const Text('대출 계산하기')),
         if (_result != null) _LoanResultView(_result!),
+        const SizedBox(height: 12),
+        _policySection(context),
+        const SizedBox(height: 8),
+        const CalcBasisLink(section: BasisSection.loan),
       ],
     );
   }
@@ -319,6 +410,57 @@ class _LoanResultView extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// 정책대출 결과 한 줄
+class _PolicyResultTile extends StatelessWidget {
+  final PolicyLoanCheck p;
+  const _PolicyResultTile(this.p);
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final ok = p.eligible;
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(top: 12),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: ok ? cs.primary : cs.outlineVariant),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(ok ? Icons.check_circle : Icons.cancel_outlined,
+                  size: 20, color: ok ? cs.primary : cs.outline),
+              const SizedBox(width: 6),
+              Text(p.name, style: const TextStyle(fontWeight: FontWeight.bold)),
+              const Spacer(),
+              Text(ok ? '대상일 수 있어요' : '조건 미충족',
+                  style: TextStyle(fontSize: 12, color: ok ? cs.primary : cs.error)),
+            ],
+          ),
+          if (ok) ...[
+            const SizedBox(height: 8),
+            Text('예상 최대 한도 ${formatKorean(p.maxLimit)}',
+                style: const TextStyle(fontWeight: FontWeight.w600)),
+          ],
+          const SizedBox(height: 6),
+          for (final f in p.failed)
+            Text('✕ $f', style: TextStyle(fontSize: 12, color: cs.error)),
+          for (final s in p.passed)
+            Text('✓ $s', style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant)),
+          const SizedBox(height: 6),
+          Text('금리: ${p.rateText}', style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant)),
+          for (final n in p.notes)
+            Text('• $n', style: TextStyle(fontSize: 11, color: cs.outline)),
+        ],
+      ),
     );
   }
 }

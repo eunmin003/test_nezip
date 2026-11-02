@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models/favorite_complex.dart';
 import '../models/redev_zone.dart';
+import '../services/official_price_service.dart';
 import '../tax/calculator.dart' show formatKorean;
 import 'loan_simulator_screen.dart';
 import 'tax_simulator_screen.dart';
@@ -178,27 +179,82 @@ class _StageBar extends StatelessWidget {
   }
 }
 
-/// 관심 단지 상세: 세금 / 대출 (가격·지역 자동 입력)
-class FavoriteDetailScreen extends StatelessWidget {
+/// 관심 단지 상세: 세금 / 대출 (가격·지역·공시가격 자동 입력)
+class FavoriteDetailScreen extends StatefulWidget {
   final FavoriteComplex complex;
   final int initialTab;
   const FavoriteDetailScreen({super.key, required this.complex, this.initialTab = 0});
 
   @override
+  State<FavoriteDetailScreen> createState() => _FavoriteDetailScreenState();
+}
+
+class _FavoriteDetailScreenState extends State<FavoriteDetailScreen> {
+  late final Future<OfficialPrice?> _officialFuture = _loadOfficialPrice();
+
+  /// 공시가격: 이미 있으면 그대로, PNU나 지번 주소가 있으면 API 조회, 없으면 null(추정값 사용)
+  Future<OfficialPrice?> _loadOfficialPrice() async {
+    final c = widget.complex;
+    if (c.officialPrice != null) {
+      return OfficialPrice(price: c.officialPrice!, year: DateTime.now().year);
+    }
+    if (!c.canLookupOfficialPrice) return null;
+    try {
+      var pnu = c.pnu;
+      if (pnu == null || pnu.length != 19) {
+        pnu = await OfficialPriceService.findPnu(c.parcelAddress!);
+      }
+      if (pnu == null) return null;
+      return await OfficialPriceService.fetchFor(
+        pnu: pnu,
+        dong: c.dong,
+        ho: c.ho,
+        areaM2: c.areaM2,
+      ).timeout(const Duration(seconds: 10));
+    } catch (_) {
+      return null; // 실패하면 추정값으로 계산
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final c = widget.complex;
     return DefaultTabController(
       length: 2,
-      initialIndex: initialTab,
+      initialIndex: widget.initialTab,
       child: Scaffold(
         appBar: AppBar(
-          title: Text(complex.name),
+          title: Text(c.name),
           bottom: const TabBar(tabs: [Tab(text: '세금'), Tab(text: '대출')]),
         ),
-        body: TabBarView(
-          children: [
-            TaxSimulatorScreen(initialPrice: complex.recentPrice, initialRegion: complex.region),
-            LoanSimulatorScreen(initialPrice: complex.recentPrice, initialRegion: complex.region),
-          ],
+        body: FutureBuilder<OfficialPrice?>(
+          future: _officialFuture,
+          builder: (context, snap) {
+            if (snap.connectionState != ConnectionState.done) {
+              return const Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    CircularProgressIndicator(),
+                    SizedBox(height: 12),
+                    Text('공시가격을 불러오는 중이에요'),
+                  ],
+                ),
+              );
+            }
+            final official = snap.data;
+            return TabBarView(
+              children: [
+                TaxSimulatorScreen(
+                  initialPrice: c.recentPrice,
+                  initialRegion: c.region,
+                  initialOfficialPrice: official?.price,
+                  officialPriceYear: official?.year,
+                ),
+                LoanSimulatorScreen(initialPrice: c.recentPrice, initialRegion: c.region),
+              ],
+            );
+          },
         ),
       ),
     );

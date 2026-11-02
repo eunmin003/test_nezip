@@ -3,6 +3,8 @@ import 'package:flutter/services.dart';
 import '../tax/calculator.dart';
 import '../tax/region_rules.dart';
 import '../tax/holding_tax.dart';
+import '../tax/right_transfer_tax.dart';
+import 'calc_basis_screen.dart';
 
 /// 세금 계산 시뮬레이터 (계산기 탭 > 세금 탭 안에 들어감)
 /// [initialPrice]: 관심 단지 실거래가(원)
@@ -10,7 +12,15 @@ import '../tax/holding_tax.dart';
 class TaxSimulatorScreen extends StatelessWidget {
   final int? initialPrice;
   final Region? initialRegion;
-  const TaxSimulatorScreen({super.key, this.initialPrice, this.initialRegion});
+  final int? initialOfficialPrice; // 공시가격 API로 불러온 값 (원)
+  final int? officialPriceYear;
+  const TaxSimulatorScreen({
+    super.key,
+    this.initialPrice,
+    this.initialRegion,
+    this.initialOfficialPrice,
+    this.officialPriceYear,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -30,8 +40,12 @@ class TaxSimulatorScreen extends StatelessWidget {
             child: TabBarView(
               children: [
                 _AcquisitionForm(initialPrice: initialPrice, initialRegion: initialRegion),
-                _TransferForm(initialPrice: initialPrice, initialRegion: initialRegion),
-                _HoldingForm(initialPrice: initialPrice),
+                _SellTab(initialPrice: initialPrice, initialRegion: initialRegion),
+                _HoldingForm(
+                  initialPrice: initialPrice,
+                  officialPrice: initialOfficialPrice,
+                  officialYear: officialPriceYear,
+                ),
                 _GiftForm(initialPrice: initialPrice, initialRegion: initialRegion),
               ],
             ),
@@ -386,6 +400,8 @@ class _AcquisitionFormState extends State<_AcquisitionForm> with AutomaticKeepAl
         FilledButton(onPressed: _calc, child: const Text('취득세 계산하기')),
         if (_result != null)
           _ResultCard(_result!, extraNotes: ['지역: ${_region.label}']),
+        const SizedBox(height: 8),
+        const CalcBasisLink(section: BasisSection.acquisition),
       ],
     );
   }
@@ -548,6 +564,8 @@ class _TransferFormState extends State<_TransferForm> with AutomaticKeepAliveCli
         const SizedBox(height: 8),
         FilledButton(onPressed: _calc, child: const Text('양도세 계산하기')),
         if (_result != null) _ResultCard(_result!, extraNotes: _extraNotes),
+        const SizedBox(height: 8),
+        const CalcBasisLink(section: BasisSection.transfer),
       ],
     );
   }
@@ -685,6 +703,8 @@ class _GiftFormState extends State<_GiftForm> with AutomaticKeepAliveClientMixin
         FilledButton(onPressed: _calc, child: const Text('증여세 계산하기')),
         if (_result != null)
           _ResultCard(_result!, extraNotes: [if (_housing) '지역: ${_region.label}']),
+        const SizedBox(height: 8),
+        const CalcBasisLink(section: BasisSection.gift),
       ],
     );
   }
@@ -693,17 +713,21 @@ class _GiftFormState extends State<_GiftForm> with AutomaticKeepAliveClientMixin
 // ═════════════════════ 탭 3: 보유할 때 (재산세·종부세) ═════════════════════
 class _HoldingForm extends StatefulWidget {
   final int? initialPrice;
-  const _HoldingForm({this.initialPrice});
+  final int? officialPrice; // 공시가격 API 값이 있으면 이걸 우선 사용
+  final int? officialYear;
+  const _HoldingForm({this.initialPrice, this.officialPrice, this.officialYear});
   @override
   State<_HoldingForm> createState() => _HoldingFormState();
 }
 
 class _HoldingFormState extends State<_HoldingForm> with AutomaticKeepAliveClientMixin {
-  // 실거래가가 넘어오면 공시가격을 약 69%로 추정해서 채움
+  // 공시가격 API 값이 있으면 그대로, 없으면 실거래가의 약 69%로 추정
   late final TextEditingController _official = TextEditingController(
-      text: widget.initialPrice == null
+      text: widget.officialPrice != null
+          ? (widget.officialPrice! ~/ kMan).toString()
+          : (widget.initialPrice == null
           ? null
-          : ((widget.initialPrice! * 0.69) ~/ kMan).toString());
+          : ((widget.initialPrice! * 0.69) ~/ kMan).toString()));
   final _others = TextEditingController();
   final _age = TextEditingController();
   final _hold = TextEditingController();
@@ -759,9 +783,11 @@ class _HoldingFormState extends State<_HoldingForm> with AutomaticKeepAliveClien
         _MoneyField(
           label: '이 집 공시가격',
           controller: _official,
-          hint: widget.initialPrice != null
+          hint: widget.officialPrice != null
+              ? '${widget.officialYear ?? ''}년 공시가격을 불러왔어요 (국토교통부)'
+              : (widget.initialPrice != null
               ? '실거래가의 약 69%로 추정했어요 · 정확한 값은 부동산공시가격알리미'
-              : '부동산공시가격알리미에서 확인할 수 있어요',
+              : '부동산공시가격알리미에서 확인할 수 있어요'),
         ),
         _HouseCountField(
             label: '6월 1일 기준 우리 가족 주택 수',
@@ -781,6 +807,228 @@ class _HoldingFormState extends State<_HoldingForm> with AutomaticKeepAliveClien
         const SizedBox(height: 8),
         FilledButton(onPressed: _calc, child: const Text('보유세 계산하기')),
         if (_result != null) _ResultCard(_result!),
+        const SizedBox(height: 8),
+        const CalcBasisLink(section: BasisSection.holding),
+      ],
+    );
+  }
+}
+
+// ═════════════════════ 탭 2: 팔 때 (주택 / 입주권·분양권 선택) ═════════════════════
+class _SellTab extends StatefulWidget {
+  final int? initialPrice;
+  final Region? initialRegion;
+  const _SellTab({this.initialPrice, this.initialRegion});
+  @override
+  State<_SellTab> createState() => _SellTabState();
+}
+
+class _SellTabState extends State<_SellTab> with AutomaticKeepAliveClientMixin {
+  int _kind = 0; // 0: 주택, 1: 입주권·분양권
+
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+          child: SizedBox(
+            width: double.infinity,
+            child: SegmentedButton<int>(
+              showSelectedIcon: false,
+              segments: const [
+                ButtonSegment(value: 0, label: Text('주택')),
+                ButtonSegment(value: 1, label: Text('입주권 · 분양권')),
+              ],
+              selected: {_kind},
+              onSelectionChanged: (s) => setState(() => _kind = s.first),
+            ),
+          ),
+        ),
+        Expanded(
+          child: IndexedStack(
+            index: _kind,
+            sizing: StackFit.expand,
+            children: [
+              _TransferForm(initialPrice: widget.initialPrice, initialRegion: widget.initialRegion),
+              _RightTransferForm(initialPrice: widget.initialPrice),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// ═════════════════════ 팔 때: 조합원입주권 · 분양권 ═════════════════════
+class _RightTransferForm extends StatefulWidget {
+  final int? initialPrice;
+  const _RightTransferForm({this.initialPrice});
+  @override
+  State<_RightTransferForm> createState() => _RightTransferFormState();
+}
+
+class _RightTransferFormState extends State<_RightTransferForm>
+    with AutomaticKeepAliveClientMixin {
+  late final TextEditingController _sale =
+  TextEditingController(text: _manText(widget.initialPrice));
+  final _buy = TextEditingController();
+  final _expense = TextEditingController();
+  final _rightValue = TextEditingController();
+  final _settlement = TextEditingController();
+  final _liveYears = TextEditingController();
+  RightType _type = RightType.memberOriginal;
+  DateTime? _buyDate;
+  DateTime? _approvalDate;
+  DateTime _saleDate = DateTime.now();
+  int _houses = 1;
+  bool _regBuy = false;
+  TaxResult? _result;
+
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
+  void dispose() {
+    for (final c in [_sale, _buy, _expense, _rightValue, _settlement, _liveYears]) {
+      c.dispose();
+    }
+    super.dispose();
+  }
+
+  bool get _isOriginal => _type == RightType.memberOriginal;
+  bool get _isMember => _type != RightType.presale;
+
+  void _calc() {
+    FocusScope.of(context).unfocus();
+    String? missing;
+    if (_buyDate == null) missing = _isOriginal ? '종전 주택 취득일' : '취득일';
+    if (_isOriginal && _approvalDate == null) missing = '관리처분계획인가일';
+    if (missing != null) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('$missing을 선택해 주세요.')));
+      return;
+    }
+    setState(() {
+      _result = calcRightTransferTax(RightTransferInput(
+        type: _type,
+        salePrice: _wonFrom(_sale),
+        buyPrice: _wonFrom(_buy),
+        expenses: _wonFrom(_expense),
+        rightValue: _isOriginal ? _wonFrom(_rightValue) : 0,
+        paidSettlement: _isMember ? _wonFrom(_settlement) : 0,
+        buyDate: _buyDate!,
+        saleDate: _saleDate,
+        approvalDate: _approvalDate,
+        liveMonths: _isOriginal ? (int.tryParse(_liveYears.text) ?? 0) * 12 : 0,
+        houses: _houses,
+        regulatedAtBuy: _regBuy,
+      ));
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    final cs = Theme.of(context).colorScheme;
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          child: DropdownButtonFormField<RightType>(
+            key: ValueKey('right-$_type'),
+            value: _type,
+            isExpanded: true,
+            decoration: const InputDecoration(labelText: '무엇을 파나요?', border: OutlineInputBorder()),
+            items: RightType.values
+                .map((t) => DropdownMenuItem(value: t, child: Text(t.label)))
+                .toList(),
+            onChanged: (v) => setState(() {
+              _type = v ?? RightType.memberOriginal;
+              _result = null;
+            }),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.only(bottom: 6),
+          child: Text(_type.help, style: TextStyle(fontSize: 12, color: cs.outline)),
+        ),
+        _MoneyField(label: '파는 가격', controller: _sale, hint: '프리미엄을 포함한 실제 거래 금액'),
+        _MoneyField(
+          label: _isOriginal ? '종전 주택을 샀던 가격' : '샀던 가격 (프리미엄 포함)',
+          controller: _buy,
+        ),
+        _MoneyField(label: '필요경비', controller: _expense, hint: '취득세, 중개수수료 등'),
+        if (_isOriginal)
+          _MoneyField(
+            label: '권리가액',
+            controller: _rightValue,
+            hint: '관리처분계획서에 적힌 종전 주택 평가액',
+          ),
+        if (_isMember)
+          _MoneyField(label: '낸 추가분담금 (청산금)', controller: _settlement, hint: '없으면 비워두세요'),
+        const SizedBox(height: 6),
+        _DateButton(
+          label: _isOriginal ? '종전 주택 취득일' : '취득일',
+          date: _buyDate,
+          onTap: () async {
+            final d = await _pickDate(context, _buyDate ?? DateTime(2015, 1, 1));
+            if (d != null) setState(() => _buyDate = d);
+          },
+        ),
+        if (_isOriginal) ...[
+          const SizedBox(height: 6),
+          _DateButton(
+            label: '관리처분계획인가일',
+            date: _approvalDate,
+            onTap: () async {
+              final d = await _pickDate(context, _approvalDate ?? DateTime(2022, 1, 1));
+              if (d != null) setState(() => _approvalDate = d);
+            },
+          ),
+        ],
+        const SizedBox(height: 6),
+        _DateButton(
+          label: '양도일',
+          date: _saleDate,
+          onTap: () async {
+            final d = await _pickDate(context, _saleDate);
+            if (d != null) setState(() => _saleDate = d);
+          },
+        ),
+        if (_isOriginal) ...[
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 6),
+            child: TextField(
+              controller: _liveYears,
+              keyboardType: TextInputType.number,
+              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+              decoration: const InputDecoration(
+                  labelText: '종전 주택에 실제 거주한 기간',
+                  suffixText: '년',
+                  border: OutlineInputBorder()),
+            ),
+          ),
+          _HouseCountField(
+              label: '팔 때 우리 가족 주택 수 (입주권 포함)',
+              value: _houses,
+              onChanged: (v) => setState(() => _houses = v)),
+          _Toggle(
+              title: '종전 주택을 살 때 조정대상지역이었음',
+              subtitle: '1주택 비과세에 2년 거주 요건이 붙어요',
+              value: _regBuy,
+              onChanged: (v) => setState(() => _regBuy = v)),
+        ],
+        const SizedBox(height: 8),
+        FilledButton(onPressed: _calc, child: const Text('양도세 계산하기')),
+        if (_result != null) _ResultCard(_result!),
+        const SizedBox(height: 8),
+        const CalcBasisLink(section: BasisSection.right),
       ],
     );
   }

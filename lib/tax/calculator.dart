@@ -195,7 +195,11 @@ TaxResult calcAcquisitionTax(AcquisitionInput i) {
       ? 0.0
       : (rate >= 0.12 ? 0.01 : (rate >= 0.08 ? 0.006 : 0.002));
 
-  final edu = _truncTen(i.price * eduRate);
+  // 생애최초 감면 시 지방교육세도 같은 비율로 감면
+  final eduFull = _truncTen(i.price * eduRate);
+  final edu = (relief > 0 && acq > 0)
+      ? _truncTen(eduFull * (acq - relief) / acq)
+      : eduFull;
   final rural = _truncTen(i.price * ruralRate);
   final total = acq - relief + edu + rural;
 
@@ -209,7 +213,8 @@ TaxResult calcAcquisitionTax(AcquisitionInput i) {
       TaxLine('취득가액', i.price),
       TaxLine('취득세', acq, memo: '세율 ${formatPct(rate)}'),
       if (relief > 0) TaxLine('생애최초 감면', -relief, memo: '최대 200만원'),
-      TaxLine('지방교육세', edu, memo: formatPct(eduRate)),
+      TaxLine('지방교육세', edu,
+          memo: relief > 0 ? '${formatPct(eduRate)} · 생애최초 감면 비율만큼 줄어듦' : formatPct(eduRate)),
       if (rural > 0) TaxLine('농어촌특별세', rural, memo: formatPct(ruralRate)),
       TaxLine('납부할 세금 합계', total, emphasize: true),
     ],
