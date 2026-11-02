@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'loan_simulator_screen.dart';
 import 'tax_simulator_screen.dart';
 
 /// 계산기 탭: 세금 / 대출
@@ -20,7 +21,7 @@ class CalculatorScreen extends StatelessWidget {
         body: const TabBarView(
           children: [
             TaxSimulatorScreen(),
-            Center(child: Text('대출 계산기는 준비 중입니다.')),
+            LoanSimulatorScreen(),
           ],
         ),
       ),

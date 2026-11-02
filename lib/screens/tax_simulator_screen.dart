@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../tax/calculator.dart';
 import '../tax/region_rules.dart';
+import '../tax/holding_tax.dart';
 
 /// 세금 계산 시뮬레이터 (계산기 탭 > 세금 탭 안에 들어감)
 /// [initialPrice]: 관심 단지 실거래가(원)
@@ -14,17 +15,23 @@ class TaxSimulatorScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return DefaultTabController(
-      length: 3,
+      length: 4,
       child: Column(
         children: [
           const TabBar(
-            tabs: [Tab(text: '살 때'), Tab(text: '팔 때'), Tab(text: '증여할 때')],
+            tabs: [
+              Tab(text: '살 때'),
+              Tab(text: '팔 때'),
+              Tab(text: '보유할 때'),
+              Tab(text: '증여할 때'),
+            ],
           ),
           Expanded(
             child: TabBarView(
               children: [
                 _AcquisitionForm(initialPrice: initialPrice, initialRegion: initialRegion),
                 _TransferForm(initialPrice: initialPrice, initialRegion: initialRegion),
+                _HoldingForm(initialPrice: initialPrice),
                 _GiftForm(initialPrice: initialPrice, initialRegion: initialRegion),
               ],
             ),
@@ -366,7 +373,7 @@ class _AcquisitionFormState extends State<_AcquisitionForm> with AutomaticKeepAl
         if (_houses == 2)
           _Toggle(
               title: '일시적 2주택',
-              subtitle: '기존 집을 3년 안에 팔 예정',
+              subtitle: '기존 집을 기한 내 팔 예정 (조정→조정 갈아타기는 2년, 그 외 3년)',
               value: _temp,
               onChanged: (v) => setState(() => _temp = v)),
         if (_houses == 1)
@@ -523,7 +530,7 @@ class _TransferFormState extends State<_TransferForm> with AutomaticKeepAliveCli
         if (_houses == 2)
           _Toggle(
               title: '일시적 2주택 (갈아타기)',
-              subtitle: '새 집 산 지 3년 이내에 기존 집을 파는 경우',
+              subtitle: '둘 다 조정지역이면 2년, 아니면 3년 안에 기존 집을 파는 경우',
               value: _temp,
               onChanged: (v) => setState(() => _temp = v)),
         if (_houses >= 2)
@@ -678,6 +685,102 @@ class _GiftFormState extends State<_GiftForm> with AutomaticKeepAliveClientMixin
         FilledButton(onPressed: _calc, child: const Text('증여세 계산하기')),
         if (_result != null)
           _ResultCard(_result!, extraNotes: [if (_housing) '지역: ${_region.label}']),
+      ],
+    );
+  }
+}
+
+// ═════════════════════ 탭 3: 보유할 때 (재산세·종부세) ═════════════════════
+class _HoldingForm extends StatefulWidget {
+  final int? initialPrice;
+  const _HoldingForm({this.initialPrice});
+  @override
+  State<_HoldingForm> createState() => _HoldingFormState();
+}
+
+class _HoldingFormState extends State<_HoldingForm> with AutomaticKeepAliveClientMixin {
+  // 실거래가가 넘어오면 공시가격을 약 69%로 추정해서 채움
+  late final TextEditingController _official = TextEditingController(
+      text: widget.initialPrice == null
+          ? null
+          : ((widget.initialPrice! * 0.69) ~/ kMan).toString());
+  final _others = TextEditingController();
+  final _age = TextEditingController();
+  final _hold = TextEditingController();
+  int _houses = 1;
+  bool _urban = true;
+  TaxResult? _result;
+
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
+  void dispose() {
+    _official.dispose();
+    _others.dispose();
+    _age.dispose();
+    _hold.dispose();
+    super.dispose();
+  }
+
+  void _calc() {
+    FocusScope.of(context).unfocus();
+    setState(() {
+      _result = calcHoldingTax(HoldingInput(
+        officialPrice: _wonFrom(_official),
+        houses: _houses,
+        otherOfficialTotal: _houses >= 2 ? _wonFrom(_others) : 0,
+        age: int.tryParse(_age.text) ?? 0,
+        holdYears: int.tryParse(_hold.text) ?? 0,
+        urbanArea: _urban,
+      ));
+    });
+  }
+
+  Widget _numberField(String label, TextEditingController c, String suffix) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: TextField(
+        controller: c,
+        keyboardType: TextInputType.number,
+        inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+        decoration: InputDecoration(
+            labelText: label, suffixText: suffix, border: const OutlineInputBorder()),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        _MoneyField(
+          label: '이 집 공시가격',
+          controller: _official,
+          hint: widget.initialPrice != null
+              ? '실거래가의 약 69%로 추정했어요 · 정확한 값은 부동산공시가격알리미'
+              : '부동산공시가격알리미에서 확인할 수 있어요',
+        ),
+        _HouseCountField(
+            label: '6월 1일 기준 우리 가족 주택 수',
+            value: _houses,
+            onChanged: (v) => setState(() => _houses = v)),
+        if (_houses >= 2)
+          _MoneyField(label: '다른 집 공시가격 합계', controller: _others),
+        if (_houses == 1) ...[
+          _numberField('나이', _age, '세'),
+          _numberField('이 집 보유기간', _hold, '년'),
+        ],
+        _Toggle(
+            title: '도시지역',
+            subtitle: '서울·인천·경기 아파트는 대부분 도시지역이에요',
+            value: _urban,
+            onChanged: (v) => setState(() => _urban = v)),
+        const SizedBox(height: 8),
+        FilledButton(onPressed: _calc, child: const Text('보유세 계산하기')),
+        if (_result != null) _ResultCard(_result!),
       ],
     );
   }
