@@ -131,7 +131,7 @@ class _ComplexCard extends StatelessWidget {
             if (c.isSample)
               Padding(
                 padding: const EdgeInsets.only(top: 8),
-                child: Text('예시 데이터예요 (실제 단지·가격 아님)',
+                child: Text('국토부 실거래가 기준 · 정비사업 단계는 공개 자료 기준이에요',
                     style: TextStyle(fontSize: 11, color: cs.outline)),
               ),
           ],
