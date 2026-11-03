@@ -106,7 +106,7 @@ class RedevZone {
       name: (p['name'] ?? '정비구역').toString(),
       type: (p['type'] ?? '').toString(),
       sido: (p['sido'] ?? '').toString(),
-      sgg: (p['sgg'] ?? '').toString(),
+      sgg: p['sggCode'] == '28275' ? '서해구' : (p['sgg'] ?? '').toString(),
       noticeDate: (p['noticeDate'] ?? '').toString(),
       remark: (p['remark'] ?? '').toString(),
       stage: p['stage'] as String?,

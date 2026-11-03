@@ -68,8 +68,28 @@ def geocode(address, addr_type):
             time.sleep(1.5 * (attempt + 1))
     return None
 
+# 2026.7 인천 행정체제 개편: 주소 데이터가 옛 이름/새 이름 중 무엇을 쓰는지 달라서 둘 다 시도
+RENAMED = {
+    '인천광역시 서구 ': ['인천광역시 서해구 ', '인천광역시 검단구 '],
+    '인천광역시 서해구 ': ['인천광역시 서구 '],
+    '인천광역시 검단구 ': ['인천광역시 서구 '],
+    '인천광역시 중구 ': ['인천광역시 제물포구 ', '인천광역시 영종구 '],
+    '인천광역시 동구 ': ['인천광역시 제물포구 '],
+    '인천광역시 제물포구 ': ['인천광역시 중구 ', '인천광역시 동구 '],
+    '인천광역시 영종구 ': ['인천광역시 중구 '],
+}
 
+
+def address_variants(address, sido, sgg, dong, jibun):
+    """원래 주소가 안 될 때 시도할 다른 표기들"""
+    out = []
+    for old, news in RENAMED.items():
+        if address.startswith(old):
+            out += [new + address[len(old):] for new in news]
+    out.append(f'{sido} {dong} {jibun}')  # 마지막 수단: 구 이름 빼고 (지오코더가 동으로 찾음)
+    return out
 # ───────────────────────── 2. 정비구역 안에 있는지 ─────────────────────────
+
 def point_in_ring(x, y, ring):
     inside = False
     j = len(ring) - 1
@@ -132,14 +152,22 @@ def main(in_csv, out_json):
         seen.add(key)
 
         address = f'{sido} {sgg} {dong} {jibun}'
-        if address not in cache:
-            pt = geocode(address, 'PARCEL')
-            cache[address] = pt
-            time.sleep(DELAY_SEC)
-            if n % 20 == 0:  # 중간 저장
-                with open(CACHE_PATH, 'w', encoding='utf-8') as f:
-                    json.dump(cache, f, ensure_ascii=False)
-        pt = cache[address]
+
+        def lookup(addr):
+            if addr not in cache:
+                cache[addr] = geocode(addr, 'PARCEL')
+                time.sleep(DELAY_SEC)
+            return cache[addr]
+
+        pt = lookup(address)
+        if not pt:  # 실패하면 바뀐 구 이름 등 다른 표기로 다시 시도
+            for alt in address_variants(address, sido, sgg, dong, jibun):
+                pt = lookup(alt)
+                if pt:
+                    break
+        if n % 20 == 0:  # 중간 저장
+            with open(CACHE_PATH, 'w', encoding='utf-8') as f:
+                json.dump(cache, f, ensure_ascii=False)
 
         if not pt:
             failed.append(r)
