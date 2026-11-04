@@ -34,4 +34,15 @@
             <data android:mimeType="text/plain"/>
         </intent>
     </queries>
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.PROCESS_TEXT"/>
+            <data android:mimeType="text/plain"/>
+        </intent>
+        <!-- ↓ 추가: 기사 링크(https) 열기 -->
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:scheme="https"/>
+        </intent>
+    </queries>
 </manifest>
