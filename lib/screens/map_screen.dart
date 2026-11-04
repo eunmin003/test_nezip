@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_naver_map/flutter_naver_map.dart';
 
+import '../models/favorite_complex.dart';
 import '../models/redev_zone.dart';
+import '../services/complex_repository.dart';
+import '../tax/calculator.dart' show formatKorean;
 import '../services/vworld_services.dart';
 import '../services/zone_repository.dart';
 
@@ -55,6 +58,7 @@ class _MapScreenState extends State<MapScreen> {
             ),
             onMapReady: (controller) {
               _mapController = controller;
+              ComplexRepository.preload(); // 단지 실거래 데이터 미리 읽기
               _loadZonesInCurrentBounds();
             },
             // 지도 이동이 멈추면 새로 보이는 구역을 추가로 그림
@@ -161,8 +165,16 @@ class _MapScreenState extends State<MapScreen> {
   void _showZoneSheet(RedevZone zone) {
     showModalBottomSheet(
       context: context,
+      isScrollControlled: true, // 위로 끌어올리면 목록이 길어지게
       showDragHandle: true,
-      builder: (context) => _ZoneInfoSheet(zone: zone),
+      builder: (context) => DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: 0.55,
+        minChildSize: 0.3,
+        maxChildSize: 0.92,
+        builder: (context, scrollController) =>
+            _ZoneInfoSheet(zone: zone, scrollController: scrollController),
+      ),
     );
   }
 
@@ -188,24 +200,54 @@ class _MapScreenState extends State<MapScreen> {
   }
 }
 
-/// 구역 정보 카드
-class _ZoneInfoSheet extends StatelessWidget {
+/// 구역 정보 카드 + 이 구역 단지 최근 실거래 목록
+class _ZoneInfoSheet extends StatefulWidget {
   final RedevZone zone;
+  final ScrollController scrollController;
 
-  const _ZoneInfoSheet({required this.zone});
+  const _ZoneInfoSheet({required this.zone, required this.scrollController});
+
+  @override
+  State<_ZoneInfoSheet> createState() => _ZoneInfoSheetState();
+}
+
+enum _SortBy { recent, priceHigh, priceLow }
+
+class _ZoneInfoSheetState extends State<_ZoneInfoSheet> {
+  late final Future<List<ComplexInfo>> _complexes =
+      ComplexRepository.inZone(widget.zone.id);
+  _SortBy _sort = _SortBy.recent;
+
+  List<ComplexInfo> _sorted(List<ComplexInfo> list) {
+    final l = [...list];
+    switch (_sort) {
+      case _SortBy.recent:
+        l.sort((a, b) => b.dealDate.compareTo(a.dealDate));
+      case _SortBy.priceHigh:
+        l.sort((a, b) => b.priceWon.compareTo(a.priceWon));
+      case _SortBy.priceLow:
+        l.sort((a, b) => a.priceWon.compareTo(b.priceWon));
+    }
+    return l;
+  }
 
   @override
   Widget build(BuildContext context) {
+    final zone = widget.zone;
     final textTheme = Theme.of(context).textTheme;
     final location = [zone.sido, zone.sgg].where((s) => s.isNotEmpty).join(' ');
 
-    return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
+    return FutureBuilder<List<ComplexInfo>>(
+      future: _complexes,
+      builder: (context, snap) {
+        final loading = snap.connectionState != ConnectionState.done;
+        final items = _sorted(snap.data ?? const []);
+
+        return ListView(
+          controller: widget.scrollController,
+          padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
           children: [
+            // ── 구역 정보 ──
             Row(
               children: [
                 Container(
@@ -224,34 +266,176 @@ class _ZoneInfoSheet extends StatelessWidget {
             ),
             const SizedBox(height: 4),
             Text(location, style: textTheme.bodyMedium?.copyWith(color: Colors.grey[700])),
-            const Divider(height: 24),
-            _row('사업 구분', zone.bizType ?? zone.type),
-            _row('추진 단계', zone.stage ?? '정보 없음'),
-            _row('사업 시행자', zone.executor ?? '정보 없음'),
-            _row('예정 세대수',
-                (zone.households == null || zone.households == 0) ? '정보 없음' : '${zone.households}세대'),
-            _row('지정·고시일', zone.noticeDate.isEmpty ? '정보 없음' : zone.noticeDate),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: [
+                _chip(zone.bizType ?? zone.type),
+                _chip(zone.stage ?? '단계 정보 없음', color: zone.color),
+                if (zone.households != null && zone.households != 0)
+                  _chip('예정 ${zone.households}세대'),
+                if (zone.noticeDate.isNotEmpty) _chip('고시 ${zone.noticeDate}'),
+                if (zone.executor != null) _chip('시행 ${zone.executor}'),
+              ],
+            ),
+            const Divider(height: 28),
+
+            // ── 이 구역 최근 실거래 ──
+            Row(
+              children: [
+                Text('이 구역 최근 실거래', style: textTheme.titleMedium),
+                const SizedBox(width: 6),
+                if (!loading)
+                  Text('${items.length}개 단지',
+                      style: textTheme.bodySmall?.copyWith(color: Colors.grey[700])),
+              ],
+            ),
             const SizedBox(height: 8),
+            if (!loading && items.isNotEmpty)
+              Wrap(
+                spacing: 6,
+                children: [
+                  _sortChip('최근 거래순', _SortBy.recent),
+                  _sortChip('높은 가격순', _SortBy.priceHigh),
+                  _sortChip('낮은 가격순', _SortBy.priceLow),
+                ],
+              ),
+            const SizedBox(height: 4),
+
+            if (loading)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 32),
+                child: Center(child: CircularProgressIndicator()),
+              )
+            else if (items.isEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 24),
+                child: Column(
+                  children: [
+                    Icon(Icons.receipt_long_outlined, size: 40, color: Colors.grey[400]),
+                    const SizedBox(height: 8),
+                    const Text('최근 3개월 동안 이 구역 안의 아파트·연립다세대 거래가 없어요'),
+                    const SizedBox(height: 4),
+                    Text('단독·다가구 거래는 아직 포함하지 않았어요',
+                        style: textTheme.bodySmall?.copyWith(color: Colors.grey)),
+                  ],
+                ),
+              )
+            else
+              for (final c in items) _ComplexTile(c),
+
+            const SizedBox(height: 12),
             Text(
-              '출처: 국토교통부 정비구역(2026-10 기준), 도시정비사업 현황 CSV',
+              '출처: 국토교통부 정비구역(2026-10 기준) · 아파트/연립다세대 매매 실거래가(최근 3개월)',
               style: textTheme.bodySmall?.copyWith(color: Colors.grey),
             ),
           ],
-        ),
-      ),
+        );
+      },
     );
   }
 
-  Widget _row(String label, String value) => Padding(
-    padding: const EdgeInsets.symmetric(vertical: 4),
-    child: Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        SizedBox(width: 90, child: Text(label, style: const TextStyle(color: Colors.grey))),
-        Expanded(child: Text(value)),
-      ],
-    ),
-  );
+  Widget _chip(String text, {Color? color}) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        decoration: BoxDecoration(
+          color: (color ?? Colors.grey).withValues(alpha: 0.15),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Text(text, style: const TextStyle(fontSize: 12)),
+      );
+
+  Widget _sortChip(String label, _SortBy value) => ChoiceChip(
+        label: Text(label, style: const TextStyle(fontSize: 12)),
+        selected: _sort == value,
+        visualDensity: VisualDensity.compact,
+        onSelected: (_) => setState(() => _sort = value),
+      );
+}
+
+/// 단지 한 줄: 이름 · 유형/면적/층 · 최근 거래가 · 거래일 · ♡
+class _ComplexTile extends StatelessWidget {
+  final ComplexInfo c;
+  const _ComplexTile(this.c);
+
+  @override
+  Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+    final primary = Theme.of(context).colorScheme.primary;
+    final store = FavoriteStore.instance;
+
+    final detail = [
+      c.type,
+      if (c.areaM2 != null) '${c.areaM2!.toStringAsFixed(1)}㎡(${c.pyeong!.toStringAsFixed(0)}평)',
+      if (c.floor != null && c.floor!.isNotEmpty) '${c.floor}층',
+      if (c.buildYear != null && c.buildYear!.isNotEmpty) '${c.buildYear}년',
+    ].join(' · ');
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        children: [
+          // 유형 표시 (아파트 / 연립다세대)
+          Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: (c.isApartment ? primary : Colors.teal).withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(c.isApartment ? Icons.apartment : Icons.home_work_outlined,
+                size: 20, color: c.isApartment ? primary : Colors.teal),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(c.name, style: textTheme.titleSmall, maxLines: 1, overflow: TextOverflow.ellipsis),
+                const SizedBox(height: 2),
+                Text(detail, style: textTheme.bodySmall?.copyWith(color: Colors.grey[700])),
+                const SizedBox(height: 2),
+                Text.rich(TextSpan(children: [
+                  TextSpan(
+                    text: formatKorean(c.priceWon),
+                    style: textTheme.titleSmall?.copyWith(color: primary, fontWeight: FontWeight.w700),
+                  ),
+                  TextSpan(
+                    text: '  ${c.dealDate.replaceAll('-', '.')}'
+                        '${c.dealCount > 1 ? ' · 거래 ${c.dealCount}건' : ''}',
+                    style: textTheme.bodySmall?.copyWith(color: Colors.grey[700]),
+                  ),
+                ])),
+              ],
+            ),
+          ),
+          // ♡ 찜 (관심 단지 탭으로 이어짐)
+          ValueListenableBuilder<List<FavoriteComplex>>(
+            valueListenable: store.items,
+            builder: (context, _, __) {
+              final saved = store.contains(c.id);
+              return IconButton(
+                tooltip: saved ? '관심 단지에서 빼기' : '관심 단지에 추가',
+                icon: Icon(saved ? Icons.favorite : Icons.favorite_border,
+                    color: saved ? Colors.pink : Colors.grey[600]),
+                onPressed: () {
+                  store.toggle(ComplexRepository.toFavorite(c));
+                  ScaffoldMessenger.of(context)
+                    ..hideCurrentSnackBar()
+                    ..showSnackBar(SnackBar(
+                      duration: const Duration(seconds: 2),
+                      content: Text(saved
+                          ? '${c.name}을(를) 관심 단지에서 뺐어요'
+                          : '${c.name}을(를) 관심 단지에 담았어요'),
+                    ));
+                },
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 /// 추진단계 색상 범례
