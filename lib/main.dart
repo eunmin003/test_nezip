@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_naver_map/flutter_naver_map.dart';
 
+import 'models/favorite_complex.dart';
 import 'screens/home_shell.dart';
 
 /// Client ID는 실행 옵션으로 넣습니다: --dart-define=NAVER_CLIENT_ID=발급받은ID
@@ -47,6 +48,9 @@ Future<void> main() async {
       }
     },
   );
+
+  // 기기에 저장된 찜 목록 불러오기 (앱을 껐다 켜도 유지)
+  await FavoriteStore.instance.init();
 
   runApp(const MyApp());
 }

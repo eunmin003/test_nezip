@@ -1,5 +1,9 @@
-// 관심 단지 모델 + 앱 안에서 공유하는 찜 목록
+// 관심 단지 모델 + 앱 안에서 공유하는 찜 목록 (기기에 영구 저장)
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
 import '../tax/region_rules.dart';
 
 class FavoriteComplex {
@@ -40,6 +44,46 @@ class FavoriteComplex {
   /// 공시가격 API로 조회할 수 있는 정보가 있는지
   bool get canLookupOfficialPrice =>
       (pnu != null && pnu!.length == 19) || (parcelAddress?.isNotEmpty ?? false);
+
+  /// 저장용: 객체 → JSON
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'name': name,
+    'sido': region.sido.name, // 예: 'gyeonggi'
+    'sigungu': region.sigungu, // 예: '안양시 동안구'
+    'recentPrice': recentPrice,
+    'dealDate': dealDate,
+    'areaM2': areaM2,
+    'zoneName': zoneName,
+    'stage': stage,
+    'isSample': isSample,
+    'pnu': pnu,
+    'parcelAddress': parcelAddress,
+    'dong': dong,
+    'ho': ho,
+    'officialPrice': officialPrice,
+  };
+
+  /// 복원용: JSON → 객체
+  factory FavoriteComplex.fromJson(Map<String, dynamic> j) => FavoriteComplex(
+    id: j['id'] as String,
+    name: j['name'] as String,
+    region: Region(
+      Sido.values.byName(j['sido'] as String),
+      j['sigungu'] as String,
+    ),
+    recentPrice: (j['recentPrice'] as num).toInt(),
+    dealDate: j['dealDate'] as String?,
+    areaM2: (j['areaM2'] as num?)?.toDouble(),
+    zoneName: j['zoneName'] as String?,
+    stage: j['stage'] as String?,
+    isSample: j['isSample'] as bool? ?? false,
+    pnu: j['pnu'] as String?,
+    parcelAddress: j['parcelAddress'] as String?,
+    dong: j['dong'] as String?,
+    ho: j['ho'] as String?,
+    officialPrice: (j['officialPrice'] as num?)?.toInt(),
+  );
 }
 
 /// 지오코더·CSV의 '서울특별시' + '노원구' 같은 글자를 Region으로 바꿈
@@ -64,22 +108,67 @@ Region? parseRegion(String sidoText, String sigunguText) {
   return null;
 }
 
-/// 찜 목록 (지금은 앱을 끄면 사라짐 → 나중에 서버나 저장소 연결)
+/// 찜 목록 — 기기에 저장되어 앱을 다시 켜도 유지됨
+/// 사용법: main()에서 runApp 전에 `await FavoriteStore.instance.init();`
 class FavoriteStore {
   FavoriteStore._();
   static final FavoriteStore instance = FavoriteStore._();
 
+  static const _prefsKey = 'favorites_v1';
+  bool _loaded = false;
+
   final ValueNotifier<List<FavoriteComplex>> items = ValueNotifier(const []);
+
+  /// 앱 시작 시 저장된 찜 목록 불러오기
+  Future<void> init() async {
+    if (_loaded) return;
+    _loaded = true;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_prefsKey);
+      if (raw == null) {
+        debugPrint('[찜] 저장된 목록 없음');
+        return;
+      }
+      final out = <FavoriteComplex>[];
+      for (final e in jsonDecode(raw) as List) {
+        try {
+          out.add(FavoriteComplex.fromJson(Map<String, dynamic>.from(e as Map)));
+        } catch (err) {
+          debugPrint('[찜] 단지 하나를 읽지 못해 건너뜀: $err');
+        }
+      }
+      items.value = out;
+      debugPrint('[찜] 저장된 단지 ${out.length}개 불러옴');
+    } catch (e) {
+      debugPrint('[찜] 불러오기 실패 (빈 목록으로 시작): $e');
+    }
+  }
+
+  /// 바뀔 때마다 기기에 저장
+  Future<void> _save() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = jsonEncode(items.value.map((c) => c.toJson()).toList());
+      await prefs.setString(_prefsKey, raw);
+      debugPrint('[찜] 저장: ${items.value.length}개');
+    } catch (e) {
+      debugPrint('[찜] 저장 실패: $e');
+    }
+  }
 
   bool contains(String id) => items.value.any((c) => c.id == id);
 
   void add(FavoriteComplex c) {
     if (contains(c.id)) return;
     items.value = [...items.value, c];
+    _save();
   }
 
   void remove(String id) {
+    if (!contains(id)) return;
     items.value = items.value.where((c) => c.id != id).toList();
+    _save();
   }
 
   void toggle(FavoriteComplex c) => contains(c.id) ? remove(c.id) : add(c);
