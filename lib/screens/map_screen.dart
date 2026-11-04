@@ -27,6 +27,18 @@ class _MapScreenState extends State<MapScreen> {
   /// 이 줌보다 멀리서 보면 구역을 새로 그리지 않음 (너무 많아져서 느려지는 것 방지)
   static const double _minZoomForZones = 11;
 
+  // ── 실거래가 마커 ──
+  /// 이 줌 이상에서만 실거래가 마커를 보여줌 (동네 단위로 확대했을 때)
+  static const double _minZoomForTrades = 15;
+
+  /// 이미 지도에 올린 단지 마커 id
+  final Set<String> _shownComplexIds = {};
+  bool _showTrades = true; // 상단 [실거래가] 칩으로 켜고 끄기
+  bool _loadingTrades = false;
+  double _zoom = 13;
+  NOverlayImage? _aptIcon; // 아파트 마커 점 (파랑)
+  NOverlayImage? _villaIcon; // 연립다세대 마커 점 (청록)
+
   @override
   void dispose() {
     _searchController.dispose();
@@ -57,12 +69,12 @@ class _MapScreenState extends State<MapScreen> {
               locationButtonEnable: true,
             ),
             onMapReady: (controller) {
-              _mapController = controller;
+              setState(() => _mapController = controller);
               ComplexRepository.preload(); // 단지 실거래 데이터 미리 읽기
               _loadZonesInCurrentBounds();
             },
-            // 지도 이동이 멈추면 새로 보이는 구역을 추가로 그림
-            onCameraIdle: _loadZonesInCurrentBounds,
+            // 지도 이동이 멈추면 새로 보이는 구역·실거래가를 추가로 그림
+            onCameraIdle: _onCameraIdle,
           ),
 
           // 상단 검색창
@@ -100,6 +112,48 @@ class _MapScreenState extends State<MapScreen> {
             ),
           ),
 
+          // 검색창 아래: 실거래가 켜기/끄기 + 안내
+          Positioned(
+            top: 76,
+            left: 16,
+            right: 16,
+            child: Row(
+              children: [
+                FilterChip(
+                  avatar: const Icon(Icons.sell_outlined, size: 16),
+                  label: const Text('실거래가'),
+                  selected: _showTrades,
+                  showCheckmark: false,
+                  backgroundColor: Colors.white,
+                  elevation: 2,
+                  onSelected: _toggleTrades,
+                ),
+                const SizedBox(width: 8),
+                if (_showTrades)
+                  Flexible(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.92),
+                        borderRadius: BorderRadius.circular(16),
+                        boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 4)],
+                      ),
+                      child: _zoom < _minZoomForTrades
+                          ? const Text('지도를 더 확대하면 실거래가가 보여요',
+                              style: TextStyle(fontSize: 12), overflow: TextOverflow.ellipsis)
+                          : const _TradeLegend(),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          // 오른쪽 아래 확대·축소 버튼
+          if (_mapController != null)
+            Positioned(
+              right: 12,
+              bottom: 24,
+              child: NaverMapZoomControlWidget(mapController: _mapController!),
+            ),
           // 왼쪽 아래 범례
           const Positioned(left: 12, bottom: 16, child: _StageLegend()),
 
@@ -113,8 +167,163 @@ class _MapScreenState extends State<MapScreen> {
   Future<void> _reloadZones() async {
     if (_mapController == null) return;
     await _mapController!.clearOverlays(type: NOverlayType.polygonOverlay);
+    await _mapController!.clearOverlays(type: NOverlayType.marker);
     _shownZoneIds.clear();
+    _shownComplexIds.clear();
     await _loadZonesInCurrentBounds();
+    await _loadTradeMarkers();
+  }
+
+  /// 지도 이동이 멈췄을 때
+  Future<void> _onCameraIdle() async {
+    if (_mapController == null) return;
+    final zoom = (await _mapController!.getCameraPosition()).zoom;
+    if (mounted && (zoom < _minZoomForTrades) != (_zoom < _minZoomForTrades)) {
+      setState(() => _zoom = zoom); // 안내 문구 바꾸기
+    } else {
+      _zoom = zoom;
+    }
+    await _loadZonesInCurrentBounds();
+    await _loadTradeMarkers();
+  }
+
+  /// [실거래가] 칩 켜기/끄기
+  Future<void> _toggleTrades(bool on) async {
+    setState(() => _showTrades = on);
+    if (_mapController == null) return;
+    if (on) {
+      await _loadTradeMarkers();
+    } else {
+      await _mapController!.clearOverlays(type: NOverlayType.marker);
+      _shownComplexIds.clear();
+    }
+  }
+
+  /// 마커 점 아이콘 (한 번만 만들어서 모든 마커에 재사용)
+  Future<void> _ensureTradeIcons() async {
+    if (_aptIcon != null && _villaIcon != null) return;
+    final primary = Theme.of(context).colorScheme.primary;
+    Widget dot(Color c) => Container(
+          width: 14,
+          height: 14,
+          decoration: BoxDecoration(
+            color: c,
+            shape: BoxShape.circle,
+            border: Border.all(color: Colors.white, width: 2.5),
+            boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 2)],
+          ),
+        );
+    _aptIcon = await NOverlayImage.fromWidget(
+        widget: dot(primary), size: const Size(14, 14), context: context);
+    if (!mounted) return;
+    _villaIcon = await NOverlayImage.fromWidget(
+        widget: dot(Colors.teal), size: const Size(14, 14), context: context);
+  }
+
+  /// 화면 안 단지에 실거래가 마커 그리기 (줌 15 이상, 이미 그린 단지는 건너뜀)
+  Future<void> _loadTradeMarkers() async {
+    if (_mapController == null || !_showTrades || _loadingTrades) return;
+    if (_zoom < _minZoomForTrades) return;
+
+    _loadingTrades = true;
+    try {
+      await _ensureTradeIcons();
+      if (!mounted) return;
+      final primary = Theme.of(context).colorScheme.primary;
+
+      // 너무 많이 쌓이면 한 번 비우고 다시 (앱이 느려지지 않게)
+      if (_shownComplexIds.length > 1500) {
+        await _mapController!.clearOverlays(type: NOverlayType.marker);
+        _shownComplexIds.clear();
+      }
+
+      final bounds = await _mapController!.getContentBounds();
+      final complexes = await ComplexRepository.inBounds(bounds, limit: 300);
+
+      final markers = <NAddableOverlay>{};
+      for (final c in complexes) {
+        final markerId = 'trade_${c.id}';
+        if (_shownComplexIds.contains(markerId)) continue;
+
+        final marker = NMarker(
+          id: markerId,
+          position: NLatLng(c.lat, c.lng),
+          icon: c.isApartment ? _aptIcon : _villaIcon,
+          size: const Size(14, 14),
+          anchor: const NPoint(0.5, 0.5),
+          caption: NOverlayCaption(
+            text: _shortPrice(c.priceWon),
+            textSize: 12,
+            color: c.isApartment ? primary : Colors.teal.shade700,
+            haloColor: Colors.white,
+          ),
+          captionAligns: const [NAlign.top],
+          isHideCollidedCaptions: true, // 겹치는 가격 글자는 숨김
+        );
+        marker.setMinZoom(_minZoomForTrades); // 축소하면 지도에서 자동으로 숨김
+        marker.setOnTapListener((_) => _showComplexSheet(c));
+        markers.add(marker);
+        _shownComplexIds.add(markerId);
+      }
+
+      if (markers.isNotEmpty) await _mapController!.addOverlayAll(markers);
+      debugPrint('[실거래] 화면 안 ${complexes.length}개, 새로 그림 ${markers.length}개');
+    } catch (e, st) {
+      debugPrint('[실거래] 마커 그리기 오류: $e\n$st');
+    } finally {
+      _loadingTrades = false;
+    }
+  }
+
+  /// 마커에 쓰는 짧은 가격 (예: 9.8억, 12억, 4500만)
+  static String _shortPrice(int won) {
+    if (won >= 100000000) {
+      final eok = won / 100000000;
+      final s = eok >= 10 ? eok.toStringAsFixed(0) : eok.toStringAsFixed(1);
+      return '${s.endsWith('.0') ? s.substring(0, s.length - 2) : s}억';
+    }
+    return '${won ~/ 10000}만';
+  }
+
+  /// 마커를 눌렀을 때: 단지 정보 + 소속 정비구역 + ♡
+  void _showComplexSheet(ComplexInfo c) {
+    showModalBottomSheet(
+      context: context,
+      showDragHandle: true,
+      builder: (context) {
+        final textTheme = Theme.of(context).textTheme;
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _ComplexTile(c),
+                const Divider(height: 20),
+                Row(
+                  children: [
+                    Icon(Icons.location_city_outlined, size: 18, color: Colors.grey[700]),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        c.zoneId == null
+                            ? '정비구역 밖 단지예요'
+                            : '${c.zoneName == null || c.zoneName == '정비구역' ? '정비구역 안' : c.zoneName}'
+                                '${c.zoneStage != null ? ' · ${c.zoneStage}' : ''}',
+                        style: textTheme.bodyMedium,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Text(c.address, style: textTheme.bodySmall?.copyWith(color: Colors.grey[700])),
+              ],
+            ),
+          ),
+        );
+      },
+    );
   }
 
   /// 현재 화면 안의 정비구역을 지도에 그리기 (이미 그린 구역은 건너뜀)
@@ -434,6 +643,34 @@ class _ComplexTile extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// 실거래가 마커 범례 (● 아파트  ● 연립다세대)
+class _TradeLegend extends StatelessWidget {
+  const _TradeLegend();
+
+  @override
+  Widget build(BuildContext context) {
+    final primary = Theme.of(context).colorScheme.primary;
+    Widget item(Color c, String label) => Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(width: 10, height: 10, decoration: BoxDecoration(color: c, shape: BoxShape.circle)),
+            const SizedBox(width: 4),
+            Text(label, style: const TextStyle(fontSize: 12)),
+          ],
+        );
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        item(primary, '아파트'),
+        const SizedBox(width: 10),
+        item(Colors.teal, '연립다세대'),
+        const SizedBox(width: 10),
+        const Text('최근 3개월', style: TextStyle(fontSize: 11, color: Colors.grey)),
+      ],
     );
   }
 }
