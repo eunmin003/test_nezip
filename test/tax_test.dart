@@ -76,6 +76,28 @@ void main() {
       ));
       expect(r.total, 299816000);
     });
+
+    // 비조정 2주택(중과 없음) 10억-5억, 5년 보유 → 장특공 10%
+    TransferInput nonHeavy({List<double> shares = const [1.0]}) => TransferInput(
+          salePrice: 1000000000,
+          buyPrice: 500000000,
+          expenses: 0,
+          holdMonths: 60,
+          liveMonths: 0,
+          houses: 2,
+          regulatedNow: false,
+          regulatedAtBuy: false,
+          temporaryTwo: false,
+          shares: shares,
+        );
+
+    test('단독명의 → 168,366,000원 (과세표준 4.475억 × 40% − 2,594만 + 지방세)', () {
+      expect(calcTransferTax(nonHeavy()).total, 168366000);
+    });
+
+    test('부부 공동명의 50:50 → 142,142,000원 (1인 과세표준 2.225억 × 38% − 1,994만 + 지방세, ×2)', () {
+      expect(calcTransferTax(nonHeavy(shares: const [0.5, 0.5])).total, 142142000);
+    });
   });
 
   // ───────────────── 입주권·분양권 양도세 ─────────────────

@@ -429,6 +429,8 @@ class _TransferFormState extends State<_TransferForm> with AutomaticKeepAliveCli
   int _houses = 1;
   bool _temp = false;
   bool _regBuyManual = false; // 기록이 없는 과거일 때 사용자가 직접 입력
+  bool _joint = false; // 공동명의 여부
+  double _myShare = 50; // 본인 지분 (%) — 나머지는 배우자
   TaxResult? _result;
   List<String> _extraNotes = [];
 
@@ -475,6 +477,7 @@ class _TransferFormState extends State<_TransferForm> with AutomaticKeepAliveCli
         regulatedNow: saleCheck.heavyZone,
         regulatedAtBuy: regAtBuy,
         temporaryTwo: _temp,
+        shares: _joint ? [_myShare / 100, (100 - _myShare) / 100] : const [1.0],
       ));
     });
   }
@@ -561,12 +564,80 @@ class _TransferFormState extends State<_TransferForm> with AutomaticKeepAliveCli
               },
             ),
           ),
+        _Toggle(
+            title: '공동명의 (부부 등)',
+            subtitle: '지분만큼 차익을 나눠 사람마다 따로 계산해요',
+            value: _joint,
+            onChanged: (v) => setState(() {
+                  _joint = v;
+                  _result = null;
+                })),
+        if (_joint)
+          _ShareSelector(
+            myShare: _myShare,
+            onChanged: (v) => setState(() {
+              _myShare = v;
+              _result = null;
+            }),
+          ),
         const SizedBox(height: 8),
         FilledButton(onPressed: _calc, child: const Text('양도세 계산하기')),
         if (_result != null) _ResultCard(_result!, extraNotes: _extraNotes),
         const SizedBox(height: 8),
         const CalcBasisLink(section: BasisSection.transfer),
       ],
+    );
+  }
+}
+
+/// 공동명의 지분 고르기 (본인 : 배우자)
+class _ShareSelector extends StatelessWidget {
+  final double myShare; // 본인 %
+  final ValueChanged<double> onChanged;
+  const _ShareSelector({required this.myShare, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final me = myShare.round();
+    return Container(
+      margin: const EdgeInsets.only(bottom: 6),
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 8),
+      decoration: BoxDecoration(
+        color: cs.surfaceContainerHighest.withValues(alpha: 0.6),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text('본인 $me%', style: TextStyle(fontWeight: FontWeight.bold, color: cs.primary)),
+              const Text('  :  '),
+              Text('배우자 ${100 - me}%', style: const TextStyle(fontWeight: FontWeight.bold)),
+            ],
+          ),
+          Slider(
+            value: myShare,
+            min: 5,
+            max: 95,
+            divisions: 18, // 5% 단위
+            label: '본인 $me%',
+            onChanged: onChanged,
+          ),
+          Wrap(
+            spacing: 6,
+            children: [
+              for (final v in const [50, 60, 70, 80])
+                ChoiceChip(
+                  label: Text('$v : ${100 - v}'),
+                  selected: me == v,
+                  onSelected: (_) => onChanged(v.toDouble()),
+                ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }
