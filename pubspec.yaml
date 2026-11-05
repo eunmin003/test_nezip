@@ -37,6 +37,7 @@ dependencies:
   url_launcher: ^6.3.1
   csv: ^6.0.0
   shared_preferences: ^2.3.2 # 찜 목록 영구 저장
+  kakao_flutter_sdk_user: ^2.1.0 # 카카오 로그인
 
 
 

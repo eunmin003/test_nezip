@@ -1,11 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_naver_map/flutter_naver_map.dart';
+import 'package:kakao_flutter_sdk_user/kakao_flutter_sdk_user.dart';
 
 import 'models/favorite_complex.dart';
 import 'screens/home_shell.dart';
 
 /// Client ID는 실행 옵션으로 넣습니다: --dart-define=NAVER_CLIENT_ID=발급받은ID
 const String _rawClientId = String.fromEnvironment('NAVER_CLIENT_ID');
+
+/// 카카오 네이티브 앱 키 (AndroidManifest의 scheme 'kakao{키}'와 같은 값)
+const String kKakaoNativeAppKey = '{네이티브앱키}';
 
 /// 실행 옵션에 따옴표·공백·잘못 붙은 '='가 섞여 들어와도 401이 나지 않도록 정리합니다.
 String _cleanClientId(String raw) {
@@ -48,6 +52,9 @@ Future<void> main() async {
       }
     },
   );
+
+  // 카카오 SDK 초기화
+  KakaoSdk.init(nativeAppKey: kKakaoNativeAppKey);
 
   // 기기에 저장된 찜 목록 불러오기 (앱을 껐다 켜도 유지)
   await FavoriteStore.instance.init();
