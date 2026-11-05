@@ -3,9 +3,10 @@ import 'package:flutter/material.dart';
 import 'calculator_screen.dart';
 import 'favorite_screen.dart';
 import 'map_screen.dart';
+import 'my_screen.dart';
 import 'news_screen.dart';
 
-/// 앱의 뼈대: 하단 탭 4개 (지도 / 관심 단지 / 계산기 / 소식)
+/// 앱의 뼈대: 하단 탭 5개 (지도 / 관심 단지 / 계산기 / 소식 / 마이)
 ///
 /// IndexedStack을 써서 탭을 바꿔도 각 화면의 상태가 그대로 남아 있습니다.
 /// (예: 지도 위치·줌, 계산기에 입력한 값)
@@ -24,6 +25,7 @@ class _HomeShellState extends State<HomeShell> {
     FavoriteScreen(),
     CalculatorScreen(),
     NewsScreen(),
+    MyScreen(),
   ];
 
   @override
@@ -53,6 +55,11 @@ class _HomeShellState extends State<HomeShell> {
             icon: Icon(Icons.newspaper_outlined),
             selectedIcon: Icon(Icons.newspaper),
             label: '소식',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.person_outline),
+            selectedIcon: Icon(Icons.person),
+            label: '마이',
           ),
         ],
       ),
