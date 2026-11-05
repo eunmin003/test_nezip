@@ -5,6 +5,8 @@ import '../models/favorite_complex.dart';
 import '../models/redev_zone.dart';
 import '../services/complex_repository.dart';
 import '../tax/calculator.dart' show formatKorean;
+import '../widgets/term_text.dart';
+import 'glossary_screen.dart';
 import '../services/vworld_services.dart';
 import '../services/zone_repository.dart';
 
@@ -51,6 +53,13 @@ class _MapScreenState extends State<MapScreen> {
       appBar: AppBar(
         title: const Text('도시정비사업 구역 지도'),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.menu_book_outlined),
+            tooltip: '용어 사전',
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const GlossaryScreen()),
+            ),
+          ),
           IconButton(
             icon: const Icon(Icons.refresh),
             tooltip: '다시 그리기',
@@ -551,7 +560,7 @@ class _ZoneInfoSheetState extends State<_ZoneInfoSheet> {
           color: (color ?? Colors.grey).withValues(alpha: 0.15),
           borderRadius: BorderRadius.circular(12),
         ),
-        child: Text(text, style: const TextStyle(fontSize: 12)),
+        child: TermText(text, style: const TextStyle(fontSize: 12, color: Colors.black87)), // 어려운 단어는 눌러서 뜻 보기
       );
 
   Widget _sortChip(String label, _SortBy value) => ChoiceChip(
@@ -710,7 +719,7 @@ class _StageLegend extends StatelessWidget {
                       color: RedevZone.stageColor(stage),
                     ),
                     const SizedBox(width: 6),
-                    Text(label, style: const TextStyle(fontSize: 11)),
+                    TermText(label, style: const TextStyle(fontSize: 11, color: Colors.black87)),
                   ],
                 ),
               ),
