@@ -138,8 +138,20 @@ class FavoriteStore {
           debugPrint('[찜] 단지 하나를 읽지 못해 건너뜀: $err');
         }
       }
-      items.value = out;
-      debugPrint('[찜] 저장된 단지 ${out.length}개 불러옴');
+
+      // 예시 단지는 저장된 옛날 값 대신 코드의 최신 값으로 바꿔 끼움
+      final latest = {for (final s in sampleComplexes) s.id: s};
+      var refreshed = 0;
+      final merged = out.map((c) {
+        final newer = c.isSample ? latest[c.id] : null;
+        if (newer == null) return c;
+        refreshed++;
+        return newer;
+      }).toList();
+
+      items.value = merged;
+      debugPrint('[찜] 저장된 단지 ${merged.length}개 불러옴 (예시 단지 $refreshed개 최신값으로 교체)');
+      if (refreshed > 0) _save();
     } catch (e) {
       debugPrint('[찜] 불러오기 실패 (빈 목록으로 시작): $e');
     }
@@ -180,7 +192,8 @@ class FavoriteStore {
   }
 }
 
-/// 실거래가 API 연결 전 화면 확인용 예시 (실제 단지·가격 아님)
+/// 예시 단지 — 실제 정비사업 단지 (가격: 국토부 실거래가, 단계: 공개 자료 기준)
+/// 값을 고치면 다음 실행 때 기기에 저장된 예시 단지도 자동으로 최신값으로 바뀜
 const List<FavoriteComplex> sampleComplexes = [
   FavoriteComplex(
     id: 'sample-1',
@@ -188,7 +201,7 @@ const List<FavoriteComplex> sampleComplexes = [
     region: Region(Sido.gyeonggi, '안양시 동안구'),
     recentPrice: 1040000000, // 2026.06.22 전용 84.47㎡ 8층
     dealDate: '2026.06',
-    areaM2: 84,
+    areaM2: 84.47,
     zoneName: '관양현대아파트 재건축',
     stage: '사업시행인가',
     isSample: true,
@@ -200,7 +213,7 @@ const List<FavoriteComplex> sampleComplexes = [
     region: Region(Sido.seoul, '노원구'),
     recentPrice: 1030000000, // 2026.07.08 전용 112.24㎡ 10층 (만원 단위 확인 필요)
     dealDate: '2026.07',
-    areaM2: 112,
+    areaM2: 112.24,
     zoneName: '하계한신동성아파트 재건축',
     stage: '추진위원회승인',
     isSample: true,
@@ -212,7 +225,7 @@ const List<FavoriteComplex> sampleComplexes = [
     region: Region(Sido.incheon, '계양구'),
     recentPrice: 110000000, // 2026.01.31 전용 56.72㎡ 6층 (만원 단위 확인 필요)
     dealDate: '2026.01',
-    areaM2: 57,
+    areaM2: 56.72,
     zoneName: '효성동 중앙공영아파트 소규모재건축',
     stage: '조합설립인가',
     isSample: true,
