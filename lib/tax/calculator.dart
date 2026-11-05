@@ -234,6 +234,10 @@ class TransferInput {
   final bool regulatedAtBuy; // 살 때 조정대상지역이었음 (비과세 거주요건)
   final bool temporaryTwo; // 일시적 2주택 비과세 특례 요건 충족
 
+  /// 소유 지분. 단독명의 [1.0], 부부 공동명의 반반 [0.5, 0.5], 6:4면 [0.6, 0.4]
+  /// 양도세는 사람마다 따로 계산해요 (지분만큼 차익을 나누고, 기본공제 250만원도 사람마다).
+  final List<double> shares;
+
   const TransferInput({
     required this.salePrice,
     required this.buyPrice,
@@ -244,7 +248,58 @@ class TransferInput {
     required this.regulatedNow,
     required this.regulatedAtBuy,
     required this.temporaryTwo,
+    this.shares = const [1.0],
   });
+
+  bool get isJoint => shares.length > 1;
+
+  TransferInput solo() => TransferInput(
+        salePrice: salePrice,
+        buyPrice: buyPrice,
+        expenses: expenses,
+        holdMonths: holdMonths,
+        liveMonths: liveMonths,
+        houses: houses,
+        regulatedNow: regulatedNow,
+        regulatedAtBuy: regulatedAtBuy,
+        temporaryTwo: temporaryTwo,
+      );
+}
+
+/// 한 사람 몫의 양도세 계산 결과
+class _PersonTransferTax {
+  final int taxableGain, ltcd, base, tax, local;
+  final String rateMemo;
+  const _PersonTransferTax(this.taxableGain, this.ltcd, this.base, this.tax, this.local, this.rateMemo);
+}
+
+_PersonTransferTax _personTransferTax(int taxableGain, double ltRate, double heavyExtra, int holdMonths) {
+  final ltcd = (taxableGain * ltRate).floor();
+  final income = taxableGain - ltcd;
+  final base = math.max(0, income - kTransferBasicDeduction);
+
+  // 세율: 기본(+중과) vs 단기세율 중 큰 것
+  final normalTax = _progressive(base, _incomeBrackets, extraRate: heavyExtra);
+  double? shortRate;
+  if (holdMonths < 12) {
+    shortRate = 0.7;
+  } else if (holdMonths < 24) {
+    shortRate = 0.6;
+  }
+  final shortTax = shortRate == null ? 0 : (base * shortRate).floor();
+  final useShort = shortTax > normalTax;
+  final tax = _truncTen(math.max(normalTax, shortTax));
+  final local = _truncTen(tax * 0.1);
+
+  final String rateMemo;
+  if (useShort) {
+    rateMemo = '단기 양도 ${formatPct(shortRate!)}';
+  } else if (heavyExtra > 0) {
+    rateMemo = '기본세율 + ${formatPct(heavyExtra)}p 중과';
+  } else {
+    rateMemo = '기본세율 6~45%';
+  }
+  return _PersonTransferTax(taxableGain, ltcd, base, tax, local, rateMemo);
 }
 
 TaxResult calcTransferTax(TransferInput i) {
@@ -321,49 +376,61 @@ TaxResult calcTransferTax(TransferInput i) {
     ltRate = math.min(holdY * 0.02, 0.30);
     ltMemo = '보유 $holdY년 → ${formatPct(ltRate)}';
   }
-  final ltcd = (taxableGain * ltRate).floor();
-  lines.add(TaxLine('장기보유특별공제', -ltcd, memo: ltMemo));
+  // ── 단독명의: 한 사람이 전부 / 공동명의: 지분만큼 나눠서 사람마다 따로 계산
+  if (!i.isJoint) {
+    final p = _personTransferTax(taxableGain, ltRate, heavyExtra, i.holdMonths);
+    lines.add(TaxLine('장기보유특별공제', -p.ltcd, memo: ltMemo));
+    lines.add(const TaxLine('기본공제', -kTransferBasicDeduction));
+    lines.add(TaxLine('과세표준', p.base));
+    lines.add(TaxLine('양도소득세', p.tax, memo: p.rateMemo));
+    lines.add(TaxLine('지방소득세', p.local, memo: '양도세의 10%'));
+    lines.add(TaxLine('납부할 세금 합계', p.tax + p.local, emphasize: true));
 
-  final income = taxableGain - ltcd;
-  final base = math.max(0, income - kTransferBasicDeduction);
-  lines.add(const TaxLine('기본공제', -kTransferBasicDeduction));
-  lines.add(TaxLine('과세표준', base));
+    if (heavyExtra > 0) {
+      notes.add('조정대상지역 다주택 중과가 적용됐어요 (2026.5.10 양도분부터).');
+    }
+    notes.add('양도일은 잔금일 기준이에요. 거주주택 비과세, 상생임대 등 특례는 반영되지 않았어요.');
 
-  // ── 세율: 기본(+중과) vs 단기세율 중 큰 것
-  final normalTax = _progressive(base, _incomeBrackets, extraRate: heavyExtra);
-  double? shortRate;
-  if (i.holdMonths < 12) {
-    shortRate = 0.7;
-  } else if (i.holdMonths < 24) {
-    shortRate = 0.6;
-  }
-  final shortTax = shortRate == null ? 0 : (base * shortRate).floor();
-
-  final useShort = shortTax > normalTax;
-  final tax = _truncTen(math.max(normalTax, shortTax));
-  final local = _truncTen(tax * 0.1);
-
-  String rateMemo;
-  if (useShort) {
-    rateMemo = '단기 양도 ${formatPct(shortRate!)}';
-  } else if (heavyExtra > 0) {
-    rateMemo = '기본세율 + ${formatPct(heavyExtra)}p 중과';
-  } else {
-    rateMemo = '기본세율 6~45%';
+    return TaxResult(
+      title: '양도소득세 (팔 때)',
+      total: p.tax + p.local,
+      lines: lines,
+      notes: notes,
+    );
   }
 
-  lines.add(TaxLine('양도소득세', tax, memo: rateMemo));
-  lines.add(TaxLine('지방소득세', local, memo: '양도세의 10%'));
-  lines.add(TaxLine('납부할 세금 합계', tax + local, emphasize: true));
+  // ── 공동명의
+  final shareText = i.shares.map((r) => formatPct(r)).join(' : ');
+  notes.insert(0, '공동명의 ${i.shares.length}명 (지분 $shareText)으로 사람마다 따로 계산했어요. 장기보유특별공제: $ltMemo');
 
+  var total = 0;
+  for (var k = 0; k < i.shares.length; k++) {
+    final share = i.shares[k];
+    final who = i.shares.length == 2 ? (k == 0 ? '본인' : '배우자') : '${k + 1}번째 소유자';
+    final p = _personTransferTax((taxableGain * share).floor(), ltRate, heavyExtra, i.holdMonths);
+    final sum = p.tax + p.local;
+    total += sum;
+    lines.add(TaxLine('$who (지분 ${formatPct(share)})', sum,
+        memo: '차익 ${formatKorean(p.taxableGain)} − 장특공 ${formatKorean(p.ltcd)} − 기본공제 250만 '
+            '→ 과세표준 ${formatKorean(p.base)} · ${p.rateMemo} (지방소득세 포함)'));
+  }
+  lines.add(TaxLine('납부할 세금 합계', total, emphasize: true));
+
+  // 단독명의였다면 얼마였는지 비교
+  final soloTotal = calcTransferTax(i.solo()).total;
+  if (soloTotal > total) {
+    notes.add('단독명의였다면 ${formatKorean(soloTotal)} → 공동명의로 ${formatKorean(soloTotal - total)} 줄었어요.');
+  }
+  notes.add('공동명의는 양도차익을 지분만큼 나눠 사람마다 낮은 세율 구간이 적용되고, 기본공제 250만원도 사람마다 받아요.');
+  notes.add('두 사람의 보유·거주 기간이 같다고 보고 계산했어요. 같은 해에 다른 부동산을 판 적이 있으면 결과가 달라져요.');
   if (heavyExtra > 0) {
     notes.add('조정대상지역 다주택 중과가 적용됐어요 (2026.5.10 양도분부터).');
   }
   notes.add('양도일은 잔금일 기준이에요. 거주주택 비과세, 상생임대 등 특례는 반영되지 않았어요.');
 
   return TaxResult(
-    title: '양도소득세 (팔 때)',
-    total: tax + local,
+    title: '양도소득세 (팔 때) · 공동명의',
+    total: total,
     lines: lines,
     notes: notes,
   );
