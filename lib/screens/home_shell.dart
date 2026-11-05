@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'calculator_screen.dart';
+import 'chat_screen.dart';
 import 'favorite_screen.dart';
 import 'map_screen.dart';
 import 'my_screen.dart';
@@ -32,6 +33,16 @@ class _HomeShellState extends State<HomeShell> {
   Widget build(BuildContext context) {
     return Scaffold(
       body: IndexedStack(index: _index, children: _screens),
+      // 모든 탭 오른쪽 아래에 떠 있는 AI 상담 버튼 (스크롤해도 그 자리에 고정)
+      floatingActionButton: FloatingActionButton.small(
+        heroTag: 'chat_fab',
+        tooltip: 'AI 상담',
+        onPressed: () => Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const ChatScreen()),
+        ),
+        child: const Icon(Icons.smart_toy_outlined),
+      ),
+      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,
         onDestinationSelected: (i) => setState(() => _index = i),

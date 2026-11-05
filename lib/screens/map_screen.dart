@@ -160,7 +160,7 @@ class _MapScreenState extends State<MapScreen> {
           if (_mapController != null)
             Positioned(
               right: 12,
-              bottom: 24,
+              bottom: 80, // 아래쪽 AI 상담 버튼과 겹치지 않게 위로
               child: NaverMapZoomControlWidget(mapController: _mapController!),
             ),
           // 왼쪽 아래 범례

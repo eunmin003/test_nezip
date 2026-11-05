@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/favorite_complex.dart';
 import '../services/auth_service.dart';
 import 'calc_basis_screen.dart';
+import 'chat_screen.dart';
 import 'favorite_screen.dart';
 import 'glossary_screen.dart';
 
@@ -145,9 +146,9 @@ class _MyScreenState extends State<MyScreen> {
               ListTile(
                 leading: const Icon(Icons.smart_toy_outlined),
                 title: const Text('AI 상담'),
-                subtitle: const Text('준비 중이에요'),
+                subtitle: const Text('정비사업·세금·대출 궁금한 점 물어보기'),
                 trailing: const Icon(Icons.chevron_right),
-                enabled: false,
+                onTap: () => _push(const ChatScreen()),
               ),
 
               // ── 계정 (로그인했을 때만) ──
