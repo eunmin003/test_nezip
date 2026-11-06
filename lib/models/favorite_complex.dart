@@ -108,62 +108,130 @@ Region? parseRegion(String sidoText, String sigunguText) {
   return null;
 }
 
-/// 찜 목록 — 기기에 저장되어 앱을 다시 켜도 유지됨
+/// 찜 목록 — 기기에 저장되어 앱을 다시 켜도 유지됨 + 로그인한 사용자별로 따로 저장
+///
+/// - 로그인 안 함: 기기용 목록 (저장 키 'favorites_v1')
+/// - 로그인함   : 그 사람 목록 (저장 키 'favorites_v1_카카오회원번호')
+/// - 로그인할 때 기기용 목록에 있던 단지는 그 사람 목록으로 합쳐짐 (기기용 목록은 비움)
+/// - 로그아웃하면 기기용 목록으로 돌아가고, 다시 로그인하면 내 목록이 그대로 돌아옴
+///
 /// 사용법: main()에서 runApp 전에 `await FavoriteStore.instance.init();`
+///        로그인 상태가 바뀌면 AuthService가 `switchUser(회원번호 또는 null)`을 불러줌
 class FavoriteStore {
   FavoriteStore._();
   static final FavoriteStore instance = FavoriteStore._();
 
-  static const _prefsKey = 'favorites_v1';
+  static const _guestKey = 'favorites_v1';
   bool _loaded = false;
+  String? _userId; // 지금 목록의 주인 (null이면 기기용 목록)
 
   final ValueNotifier<List<FavoriteComplex>> items = ValueNotifier(const []);
 
-  /// 앱 시작 시 저장된 찜 목록 불러오기
+  /// 지금 목록을 저장하는 키
+  String get _key => _keyFor(_userId);
+  static String _keyFor(String? userId) => userId == null ? _guestKey : '${_guestKey}_$userId';
+
+  /// 지금 목록의 주인 (로그인한 회원번호, 로그인 안 했으면 null)
+  String? get currentUserId => _userId;
+
+  /// 앱 시작 시 기기용 찜 목록 불러오기 (로그인 상태 복원은 AuthService가 이어서 함)
   Future<void> init() async {
     if (_loaded) return;
     _loaded = true;
     try {
       final prefs = await SharedPreferences.getInstance();
-      final raw = prefs.getString(_prefsKey);
-      if (raw == null) {
-        debugPrint('[찜] 저장된 목록 없음');
-        return;
-      }
-      final out = <FavoriteComplex>[];
-      for (final e in jsonDecode(raw) as List) {
-        try {
-          out.add(FavoriteComplex.fromJson(Map<String, dynamic>.from(e as Map)));
-        } catch (err) {
-          debugPrint('[찜] 단지 하나를 읽지 못해 건너뜀: $err');
-        }
-      }
-
-      // 예시 단지는 저장된 옛날 값 대신 코드의 최신 값으로 바꿔 끼움
-      final latest = {for (final s in sampleComplexes) s.id: s};
-      var refreshed = 0;
-      final merged = out.map((c) {
-        final newer = c.isSample ? latest[c.id] : null;
-        if (newer == null) return c;
-        refreshed++;
-        return newer;
-      }).toList();
-
-      items.value = merged;
-      debugPrint('[찜] 저장된 단지 ${merged.length}개 불러옴 (예시 단지 $refreshed개 최신값으로 교체)');
-      if (refreshed > 0) _save();
+      items.value = await _read(prefs, _guestKey);
     } catch (e) {
       debugPrint('[찜] 불러오기 실패 (빈 목록으로 시작): $e');
     }
   }
 
-  /// 바뀔 때마다 기기에 저장
-  Future<void> _save() async {
+  /// 로그인·로그아웃할 때 목록 바꾸기. userId가 null이면 기기용 목록으로.
+  Future<void> switchUser(String? userId) async {
+    if (userId == _userId) return;
     try {
       final prefs = await SharedPreferences.getInstance();
-      final raw = jsonEncode(items.value.map((c) => c.toJson()).toList());
-      await prefs.setString(_prefsKey, raw);
-      debugPrint('[찜] 저장: ${items.value.length}개');
+
+      if (userId == null) {
+        _userId = null;
+        items.value = await _read(prefs, _guestKey);
+        debugPrint('[찜] 로그아웃 → 기기용 목록 ${items.value.length}개');
+        return;
+      }
+
+      // 내 목록 + 로그인 전에 기기에서 찜한 단지(중복 제외)
+      final mine = await _read(prefs, _keyFor(userId));
+      final guest = await _read(prefs, _guestKey);
+      final ids = mine.map((c) => c.id).toSet();
+      final moved = guest.where((c) => !ids.contains(c.id)).toList();
+
+      _userId = userId;
+      items.value = [...mine, ...moved];
+      await _save();
+      if (guest.isNotEmpty) await prefs.remove(_guestKey); // 옮겼으니 기기용 목록은 비움
+
+      debugPrint('[찜] 로그인 → 내 목록 ${items.value.length}개 '
+          '(기기에서 옮겨 온 단지 ${moved.length}개)');
+    } catch (e) {
+      debugPrint('[찜] 목록 전환 실패: $e');
+    }
+  }
+
+  /// 회원탈퇴: 그 사람의 찜 목록만 삭제
+  Future<void> deleteUserData(String userId) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_keyFor(userId));
+      if (_userId == userId) {
+        _userId = null;
+        items.value = await _read(prefs, _guestKey);
+      }
+      debugPrint('[찜] 회원 $userId의 찜 목록 삭제');
+    } catch (e) {
+      debugPrint('[찜] 찜 목록 삭제 실패: $e');
+    }
+  }
+
+  /// 저장된 목록 읽기 (예시 단지는 코드의 최신 값으로 바꿔 끼움)
+  Future<List<FavoriteComplex>> _read(SharedPreferences prefs, String key) async {
+    final raw = prefs.getString(key);
+    if (raw == null) {
+      debugPrint('[찜] 저장된 목록 없음 ($key)');
+      return [];
+    }
+    final out = <FavoriteComplex>[];
+    for (final e in jsonDecode(raw) as List) {
+      try {
+        out.add(FavoriteComplex.fromJson(Map<String, dynamic>.from(e as Map)));
+      } catch (err) {
+        debugPrint('[찜] 단지 하나를 읽지 못해 건너뜀: $err');
+      }
+    }
+
+    final latest = {for (final s in sampleComplexes) s.id: s};
+    var refreshed = 0;
+    final merged = out.map((c) {
+      final newer = c.isSample ? latest[c.id] : null;
+      if (newer == null) return c;
+      refreshed++;
+      return newer;
+    }).toList();
+
+    if (refreshed > 0) {
+      await prefs.setString(key, jsonEncode(merged.map((c) => c.toJson()).toList()));
+    }
+    debugPrint('[찜] 저장된 단지 ${merged.length}개 불러옴 ($key, 예시 단지 $refreshed개 최신값으로 교체)');
+    return merged;
+  }
+
+  /// 바뀔 때마다 기기에 저장 (지금 목록의 주인 키로)
+  Future<void> _save() async {
+    final key = _key;
+    final list = items.value;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(key, jsonEncode(list.map((c) => c.toJson()).toList()));
+      debugPrint('[찜] 저장: ${list.length}개 ($key)');
     } catch (e) {
       debugPrint('[찜] 저장 실패: $e');
     }
