@@ -4,6 +4,7 @@ import '../tax/calculator.dart';
 import '../tax/region_rules.dart';
 import '../tax/holding_tax.dart';
 import '../tax/right_transfer_tax.dart';
+import '../widgets/term_text.dart';
 import 'calc_basis_screen.dart';
 
 /// 세금 계산 시뮬레이터 (계산기 탭 > 세금 탭 안에 들어감)
@@ -112,8 +113,8 @@ class _Toggle extends StatelessWidget {
   Widget build(BuildContext context) {
     return SwitchListTile(
       contentPadding: EdgeInsets.zero,
-      title: Text(title),
-      subtitle: subtitle == null ? null : Text(subtitle!, style: const TextStyle(fontSize: 12)),
+      title: TermText(title),
+      subtitle: subtitle == null ? null : TermText(subtitle!, style: const TextStyle(fontSize: 12)),
       value: value,
       onChanged: onChanged,
     );
@@ -264,7 +265,7 @@ class _ResultCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(result.title, style: Theme.of(context).textTheme.titleMedium),
+            TermText(result.title, style: Theme.of(context).textTheme.titleMedium),
             const SizedBox(height: 4),
             Text(
               formatWon(result.total),
@@ -283,11 +284,11 @@ class _ResultCard extends StatelessWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(l.label,
+                        TermText(l.label,
                             style: TextStyle(
                                 fontWeight: l.emphasize ? FontWeight.bold : FontWeight.normal)),
                         if (l.memo != null)
-                          Text(l.memo!, style: TextStyle(fontSize: 12, color: cs.outline)),
+                          TermText(l.memo!, style: TextStyle(fontSize: 12, color: cs.outline)),
                       ],
                     ),
                   ),
@@ -305,7 +306,7 @@ class _ResultCard extends StatelessWidget {
               const Divider(height: 24),
               ...notes.map((n) => Padding(
                 padding: const EdgeInsets.only(bottom: 4),
-                child: Text('• $n', style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant)),
+                child: TermText('• $n', style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant)),
               )),
             ],
             const SizedBox(height: 8),
@@ -1027,7 +1028,7 @@ class _RightTransferFormState extends State<_RightTransferForm>
         ),
         Padding(
           padding: const EdgeInsets.only(bottom: 6),
-          child: Text(_type.help, style: TextStyle(fontSize: 12, color: cs.outline)),
+          child: TermText(_type.help, style: TextStyle(fontSize: 12, color: cs.outline)),
         ),
         _MoneyField(label: '파는 가격', controller: _sale, hint: '프리미엄을 포함한 실제 거래 금액'),
         _MoneyField(

@@ -4,6 +4,7 @@ import '../tax/calculator.dart' show kMan, formatKorean, formatWon, formatPct;
 import '../tax/loan_calculator.dart';
 import '../tax/policy_loan.dart';
 import '../tax/region_rules.dart';
+import '../widgets/term_text.dart';
 import 'calc_basis_screen.dart';
 
 /// 대출 계산기 (LTV·DSR 한도 + 이자)
@@ -120,7 +121,7 @@ class _LoanSimulatorScreenState extends State<LoanSimulatorScreen>
       child: ExpansionTile(
         leading: Icon(Icons.verified_outlined, color: cs.primary),
         title: const Text('정책대출 대상인지 확인하기', style: TextStyle(fontWeight: FontWeight.bold)),
-        subtitle: const Text('디딤돌대출 · 보금자리론', style: TextStyle(fontSize: 12)),
+        subtitle: const TermText('디딤돌대출 · 보금자리론', style: TextStyle(fontSize: 12), firstOnly: false),
         childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
         expandedCrossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -288,8 +289,8 @@ class _LoanSimulatorScreenState extends State<LoanSimulatorScreen>
         ),
         SwitchListTile(
           contentPadding: EdgeInsets.zero,
-          title: const Text('변동금리'),
-          subtitle: const Text('끄면 고정금리 · 변동금리는 한도 계산 때 3%p를 더해요',
+          title: const TermText('변동금리'),
+          subtitle: const TermText('끄면 고정금리 · 변동금리는 한도 계산 때 3%p를 더해요',
               style: TextStyle(fontSize: 12)),
           value: _variable,
           onChanged: (v) => setState(() => _variable = v),
@@ -323,9 +324,9 @@ class _LoanResultView extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(label, style: TextStyle(fontWeight: bold ? FontWeight.bold : null)),
+                TermText(label, style: TextStyle(fontWeight: bold ? FontWeight.bold : null)),
                 if (memo != null)
-                  Text(memo, style: TextStyle(fontSize: 12, color: cs.outline)),
+                  TermText(memo, style: TextStyle(fontSize: 12, color: cs.outline)),
               ],
             ),
           ),
@@ -359,13 +360,13 @@ class _LoanResultView extends StatelessWidget {
                 Text('한도를 정한 기준: ${r.limitedBy}',
                     style: TextStyle(fontSize: 12, color: cs.outline)),
                 const Divider(height: 24),
-                Text('LTV (집값 기준)', style: t.labelLarge),
+                TermText('LTV (집값 기준)', style: t.labelLarge),
                 _row(context, 'LTV 비율', formatPct(r.ltvRatio)),
                 _row(context, '집값 × LTV', formatWon(r.ltvAmount)),
                 _row(context, '수도권 금액 상한', formatWon(r.cap), memo: '15억 이하 6억 · 25억 이하 4억 · 초과 2억'),
                 _row(context, 'LTV 기준 한도', formatWon(r.ltvLimit), bold: true),
                 const Divider(height: 24),
-                Text('DSR (소득 기준)', style: t.labelLarge),
+                TermText('DSR (소득 기준)', style: t.labelLarge),
                 _row(context, '1년에 갚을 수 있는 원리금', formatWon(r.allowedAnnual),
                     memo: '연소득 × 40% − 기존 대출'),
                 _row(context, '한도 계산 금리', formatPct(r.dsrRate),
@@ -399,7 +400,7 @@ class _LoanResultView extends StatelessWidget {
                 ],
                 ...r.notes.map((n) => Padding(
                   padding: const EdgeInsets.only(bottom: 4),
-                  child: Text('• $n',
+                  child: TermText('• $n',
                       style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant)),
                 )),
                 const SizedBox(height: 4),
@@ -452,13 +453,13 @@ class _PolicyResultTile extends StatelessWidget {
           ],
           const SizedBox(height: 6),
           for (final f in p.failed)
-            Text('✕ $f', style: TextStyle(fontSize: 12, color: cs.error)),
+            TermText('✕ $f', style: TextStyle(fontSize: 12, color: cs.error)),
           for (final s in p.passed)
-            Text('✓ $s', style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant)),
+            TermText('✓ $s', style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant)),
           const SizedBox(height: 6),
           Text('금리: ${p.rateText}', style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant)),
           for (final n in p.notes)
-            Text('• $n', style: TextStyle(fontSize: 11, color: cs.outline)),
+            TermText('• $n', style: TextStyle(fontSize: 11, color: cs.outline)),
         ],
       ),
     );
