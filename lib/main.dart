@@ -4,12 +4,13 @@ import 'package:kakao_flutter_sdk_user/kakao_flutter_sdk_user.dart';
 
 import 'models/favorite_complex.dart';
 import 'screens/home_shell.dart';
+import 'services/auth_service.dart';
 
 /// Client ID는 실행 옵션으로 넣습니다: --dart-define=NAVER_CLIENT_ID=발급받은ID
 const String _rawClientId = String.fromEnvironment('NAVER_CLIENT_ID');
 
 /// 카카오 네이티브 앱 키 (AndroidManifest의 scheme 'kakao{키}'와 같은 값)
-const String kKakaoNativeAppKey = '{네이티브앱키}';
+const String kKakaoNativeAppKey = '2a7e50030e31cd164c290e403f456067';
 
 /// 실행 옵션에 따옴표·공백·잘못 붙은 '='가 섞여 들어와도 401이 나지 않도록 정리합니다.
 String _cleanClientId(String raw) {
@@ -53,11 +54,14 @@ Future<void> main() async {
     },
   );
 
-  // 카카오 SDK 초기화
-  KakaoSdk.init(nativeAppKey: kKakaoNativeAppKey);
+  // 카카오 SDK 초기화 (로그인 복원보다 먼저)
+  await KakaoSdk.init(nativeAppKey: kKakaoNativeAppKey);
 
-  // 기기에 저장된 찜 목록 불러오기 (앱을 껐다 켜도 유지)
+  // 1) 기기에 저장된 찜 목록 불러오기 (앱을 껐다 켜도 유지)
   await FavoriteStore.instance.init();
+
+  // 2) 로그인 상태 복원 → 로그인돼 있으면 찜 목록을 그 사람 것으로 바꿈
+  await AuthService.instance.init();
 
   runApp(const MyApp());
 }
